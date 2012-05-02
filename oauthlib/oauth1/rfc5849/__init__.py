@@ -13,7 +13,7 @@ import logging
 import urlparse
 
 from oauthlib.common import Request, urlencode
-from . import parameters, signature, utils, constants
+from . import constants, parameters, signature, utils
 
 
 class Client(object):
@@ -23,8 +23,8 @@ class Client(object):
             resource_owner_key=None,
             resource_owner_secret=None,
             callback_uri=None,
-            signature_method=SIGNATURE_HMAC,
-            signature_type=SIGNATURE_TYPE_AUTH_HEADER,
+            signature_method=constants.SIGNATURE_METHOD_HMAC,
+            signature_type=constants.SIGNATURE_TYPE_AUTH_HEADER,
             rsa_key=None, verifier=None):
         self.client_key = client_key
         self.client_secret = client_secret
@@ -36,25 +36,23 @@ class Client(object):
         self.rsa_key = rsa_key
         self.verifier = verifier
 
-        if self.signature_method == SIGNATURE_RSA and self.rsa_key is None:
+        if (self.signature_method == constants.SIGNATURE_METHOD_RSA and
+                self.rsa_key is None):
             raise ValueError('rsa_key is required when using RSA signature method.')
 
     def get_oauth_signature(self, request):
         """Get an OAuth signature to be used in signing a request
         """
-        if self.signature_method == SIGNATURE_PLAINTEXT:
+        if self.signature_method == constants.SIGNATURE_METHOD_PLAINTEXT:
             # fast-path
             return signature.sign_plaintext(self.client_secret,
                 self.resource_owner_secret)
 
         # XXX hack to make sure oauth params are included in the info
         # passed to collect_parameters below. Is there a cleaner way?
-        uri, headers, body = self._render(request)
+        request = self._render(request)
 
-        collected_params = signature.collect_parameters(
-            uri_query=urlparse.urlparse(uri).query,
-            body=body,
-            headers=headers)
+        collected_params = signature.collect_parameters(request)
         logging.debug("Collected params: {0}".format(collected_params))
 
         normalized_params = signature.normalize_parameters(collected_params)
@@ -67,14 +65,13 @@ class Client(object):
 
         logging.debug("Base signing string: {0}".format(base_string))
 
-        if self.signature_method == SIGNATURE_HMAC:
+        if self.signature_method == constants.SIGNATURE_METHOD_HMAC:
             return signature.sign_hmac_sha1(base_string, self.client_secret,
                 self.resource_owner_secret)
-        elif self.signature_method == SIGNATURE_RSA:
+        elif self.signature_method == constants.SIGNATURE_METHOD_RSA:
             return signature.sign_rsa_sha1(base_string, self.rsa_key)
         else:
-            return signature.sign_plaintext(self.client_secret,
-                self.resource_owner_secret)
+            raise ValueError("Unknown signature method: %s" % self.signature_method)
 
     def get_oauth_params(self):
         """Get the basic OAuth parameters to be used in generating a signature.
@@ -105,29 +102,7 @@ class Client(object):
         """
         # TODO what if there are body params on a header-type auth?
         # TODO what if there are query params on a body-type auth?
-
-        uri, headers, body = request.uri, request.headers, request.body
-
-        # TODO: right now these prepare_* methods are very narrow in scope--they
-        # only affect their little thing. In some cases (for example, with
-        # header auth) it might be advantageous to allow these methods to touch
-        # other parts of the request, like the headers—so the prepare_headers
-        # method could also set the Content-Type header to x-www-form-urlencoded
-        # like the spec requires. This would be a fundamental change though, and
-        # I'm not sure how I feel about it.
-        if self.signature_type == SIGNATURE_TYPE_AUTH_HEADER:
-            request = parameters.prepare_headers(request)
-        elif self.signature_type == SIGNATURE_TYPE_BODY and request.decoded_body is not None:
-            body = parameters.prepare_form_encoded_body(request.oauth_params, request.decoded_body)
-            if formencode:
-                body = urlencode(body)
-            headers['Content-Type'] = u'application/x-www-form-urlencoded'
-        elif self.signature_type == SIGNATURE_TYPE_QUERY:
-            uri = parameters.prepare_request_uri_query(request.oauth_params, request.uri)
-        else:
-            raise ValueError('Unknown signature type specified.')
-
-        return uri, headers, body
+        return parameters.prepare_request(request, self.signature_type)
 
     def sign(self, uri, http_method=u'GET', body=None, headers=None):
         """Sign a request
@@ -159,8 +134,9 @@ class Client(object):
         # sanity check
         content_type = request.headers.get('Content-Type', None)
         multipart = content_type and content_type.startswith('multipart/')
-        should_have_params = content_type == CONTENT_TYPE_FORM_URLENCODED
+        should_have_params = content_type == constants.CONTENT_TYPE_FORM_URLENCODED
         has_params = request.decoded_body is not None
+
         # 3.4.1.3.1.  Parameter Sources
         # [Parameters are collected from the HTTP request entity-body, but only
         # if [...]:
@@ -176,7 +152,6 @@ class Client(object):
         #       header field set to "application/x-www-form-urlencoded".
         elif not should_have_params and has_params:
             raise ValueError("Body contains parameters but Content-Type header was not set.")
-
         # 3.5.2.  Form-Encoded Body
         # Protocol parameters can be transmitted in the HTTP request entity-
         # body, but only if the following REQUIRED conditions are met:
@@ -186,7 +161,7 @@ class Client(object):
         #    [W3C.REC-html40-19980424].
         # o  The HTTP request entity-header includes the "Content-Type" header
         #    field set to "application/x-www-form-urlencoded".
-        elif self.signature_type == SIGNATURE_TYPE_BODY and not (
+        elif self.signature_type == constants.SIGNATURE_TYPE_BODY and not (
                 should_have_params and has_params and not multipart):
             raise ValueError('Body signatures may only be used with form-urlencoded content')
 
@@ -197,12 +172,14 @@ class Client(object):
         request.oauth_params.append((u'oauth_signature', self.get_oauth_signature(request)))
 
         # render the signed request and return it
-        return self._render(request, formencode=True)
+        request = self._render(request)
+        return request.uri, request.headers, request.urlencoded_body
 
 
 class Server(object):
     """A server used to verify OAuth 1.0 RFC 5849 requests"""
-    def __init__(self, signature_method=SIGNATURE_HMAC, rsa_key=None):
+    def __init__(self, signature_method=constants.SIGNATURE_METHOD_HMAC,
+            rsa_key=None):
         self.signature_method = signature_method
         self.rsa_key = rsa_key
 
@@ -214,13 +191,13 @@ class Server(object):
 
     def get_signature_type_and_params(self, uri_query, headers, body):
         signature_types_with_oauth_params = filter(lambda s: s[1], (
-            (SIGNATURE_TYPE_AUTH_HEADER, utils.filter_oauth_params(
+            (constants.SIGNATURE_TYPE_AUTH_HEADER, utils.filter_oauth_params(
                 signature.collect_parameters(headers=headers,
                 exclude_oauth_signature=False))),
-            (SIGNATURE_TYPE_BODY, utils.filter_oauth_params(
+            (constants.SIGNATURE_TYPE_BODY, utils.filter_oauth_params(
                 signature.collect_parameters(body=body,
                 exclude_oauth_signature=False))),
-            (SIGNATURE_TYPE_QUERY, utils.filter_oauth_params(
+            (constants.SIGNATURE_TYPE_QUERY, utils.filter_oauth_params(
                 signature.collect_parameters(uri_query=uri_query,
                 exclude_oauth_signature=False))),
         ))
@@ -289,7 +266,7 @@ class Server(object):
             raise ValueError("Invalid OAuth version.")
 
         # signature method must be valid
-        if not signature_method in SIGNATURE_METHODS:
+        if not signature_method in constants.SIGNATURE_METHODS:
             raise ValueError("Invalid signature method.")
 
         # ensure client key is valid
@@ -309,7 +286,7 @@ class Server(object):
         # oauth_client parameters depend on client chosen signature method
         # which may vary for each request, section 3.4
         # HMAC-SHA1 and PLAINTEXT share parameters
-        if signature_method == SIGNATURE_RSA:
+        if signature_method == constants.SIGNATURE_METHOD_RSA:
             oauth_client = Client(client_key,
                 resource_owner_key=resource_owner_key,
                 callback_uri=callback_uri,

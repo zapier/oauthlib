@@ -15,8 +15,6 @@ from . import constants, utils
 from oauthlib.common import extract_params, urlencode
 
 
-# TODO: do we need filter_params now that oauth_params are handled by Request?
-#       We can easily pass in just oauth protocol params.
 def prepare_headers(request, realm=None):
     """**Prepare the Authorization header.**
     Per `section 3.5.1`_ of the spec.
@@ -40,12 +38,14 @@ def prepare_headers(request, realm=None):
     .. _`section 3.5.1`: http://tools.ietf.org/html/rfc5849#section-3.5.1
     .. _`RFC2617`: http://tools.ietf.org/html/rfc2617
     """
+    if not request.oauth_params:
+        raise ValueError('request.oauth_params must be present.')
     new_request = request.clone()
 
     # Protocol parameters SHALL be included in the "Authorization" header
     # field as follows:
     authorization_header_parameters_parts = []
-    for oauth_parameter_name, value in oauth_params:
+    for oauth_parameter_name, value in new_request.oauth_params:
         # 1.  Parameter names and values are encoded per Parameter Encoding
         #     (`Section 3.6`_)
         #
@@ -105,7 +105,7 @@ def _append_params(oauth_params, params):
     return merged
 
 
-def prepare_form_encoded_body(request, formencode=False):
+def prepare_form_encoded_body(request):
     """Prepare the Form-Encoded Body.
 
     Per `section 3.5.2`_ of the spec.
@@ -113,11 +113,12 @@ def prepare_form_encoded_body(request, formencode=False):
     .. _`section 3.5.2`: http://tools.ietf.org/html/rfc5849#section-3.5.2
 
     """
+    if not request.oauth_params:
+        raise ValueError('request.oauth_params must be present.')
+
     # append OAuth params to the existing body
     new_request = request.clone()
     body = _append_params(new_request.oauth_params, new_request.body)
-    if formencode:
-        body = urlencode(body)
     new_request.body = body
     new_request.headers['Content-Type'] = u'application/x-www-form-urlencoded'
     return new_request
@@ -142,12 +143,15 @@ def prepare_request_uri_query(request):
 
 
 PREPARE_BY_SIGNATURE_TYPE = {
-    constants.SIGNATURE_TYPE_AUTH_HEADER: prepare_header,
+    constants.SIGNATURE_TYPE_AUTH_HEADER: prepare_headers,
     constants.SIGNATURE_TYPE_QUERY: prepare_form_encoded_body,
     constants.SIGNATURE_TYPE_BODY: prepare_request_uri_query,
 }
 
 
 def prepare_request(request, signature_type):
-    return PREPARE_BY_SIGNATURE_TYPE[signature_type](request)
+    try:
+        return PREPARE_BY_SIGNATURE_TYPE[signature_type](request)
+    except KeyError:
+        raise ValueError('Unknown signature type specified.')
 

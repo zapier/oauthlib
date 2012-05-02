@@ -155,8 +155,14 @@ class Request(object):
         return urlparse.parse_qsl(self.uri_query, keep_blank_values=True,
                                   strict_parsing=True)
 
+    @property
+    def urlencoded_body(self):
+        return urlencode(self.body or [])
+
     def clone(self):
-        return Request(self.uri, http_method=self.http_method,
+        cloned_request = Request(self.uri, http_method=self.http_method,
             body=self.body,
             headers=copy.copy(self.headers))
+        cloned_request.oauth_params = self.oauth_params
+        return cloned_request
 
