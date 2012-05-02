@@ -13,18 +13,7 @@ import logging
 import urlparse
 
 from oauthlib.common import Request, urlencode
-from . import parameters, signature, utils
-
-SIGNATURE_HMAC = u"HMAC-SHA1"
-SIGNATURE_RSA = u"RSA-SHA1"
-SIGNATURE_PLAINTEXT = u"PLAINTEXT"
-SIGNATURE_METHODS = (SIGNATURE_HMAC, SIGNATURE_RSA, SIGNATURE_PLAINTEXT)
-
-SIGNATURE_TYPE_AUTH_HEADER = u'AUTH_HEADER'
-SIGNATURE_TYPE_QUERY = u'QUERY'
-SIGNATURE_TYPE_BODY = u'BODY'
-
-CONTENT_TYPE_FORM_URLENCODED = u'application/x-www-form-urlencoded'
+from . import parameters, signature, utils, constants
 
 
 class Client(object):
@@ -127,7 +116,7 @@ class Client(object):
         # like the spec requires. This would be a fundamental change though, and
         # I'm not sure how I feel about it.
         if self.signature_type == SIGNATURE_TYPE_AUTH_HEADER:
-            headers = parameters.prepare_headers(request.oauth_params, request.headers)
+            request = parameters.prepare_headers(request)
         elif self.signature_type == SIGNATURE_TYPE_BODY and request.decoded_body is not None:
             body = parameters.prepare_form_encoded_body(request.oauth_params, request.decoded_body)
             if formencode:

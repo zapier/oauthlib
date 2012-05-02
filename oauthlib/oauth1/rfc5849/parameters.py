@@ -11,14 +11,13 @@ This module contains methods related to `section 3.5`_ of the OAuth 1.0a spec.
 """
 
 from urlparse import urlparse, urlunparse
-from . import utils
+from . import constants, utils
 from oauthlib.common import extract_params, urlencode
 
 
 # TODO: do we need filter_params now that oauth_params are handled by Request?
 #       We can easily pass in just oauth protocol params.
-@utils.filter_params
-def prepare_headers(oauth_params, headers=None, realm=None):
+def prepare_headers(request, realm=None):
     """**Prepare the Authorization header.**
     Per `section 3.5.1`_ of the spec.
 
@@ -41,7 +40,7 @@ def prepare_headers(oauth_params, headers=None, realm=None):
     .. _`section 3.5.1`: http://tools.ietf.org/html/rfc5849#section-3.5.1
     .. _`RFC2617`: http://tools.ietf.org/html/rfc2617
     """
-    headers = headers or {}
+    new_request = request.clone()
 
     # Protocol parameters SHALL be included in the "Authorization" header
     # field as follows:
@@ -81,10 +80,8 @@ def prepare_headers(oauth_params, headers=None, realm=None):
     authorization_header = u'OAuth %s' % authorization_header_parameters
 
     # contribute the Authorization header to the given headers
-    full_headers = {}
-    full_headers.update(headers)
-    full_headers[u'Authorization'] = authorization_header
-    return full_headers
+    new_request.headers[u'Authorization'] = authorization_header
+    return new_request
 
 
 def _append_params(oauth_params, params):
@@ -108,7 +105,7 @@ def _append_params(oauth_params, params):
     return merged
 
 
-def prepare_form_encoded_body(oauth_params, body):
+def prepare_form_encoded_body(request, formencode=False):
     """Prepare the Form-Encoded Body.
 
     Per `section 3.5.2`_ of the spec.
@@ -117,10 +114,16 @@ def prepare_form_encoded_body(oauth_params, body):
 
     """
     # append OAuth params to the existing body
-    return _append_params(oauth_params, body)
+    new_request = request.clone()
+    body = _append_params(new_request.oauth_params, new_request.body)
+    if formencode:
+        body = urlencode(body)
+    new_request.body = body
+    new_request.headers['Content-Type'] = u'application/x-www-form-urlencoded'
+    return new_request
 
 
-def prepare_request_uri_query(oauth_params, uri):
+def prepare_request_uri_query(request):
     """Prepare the Request URI Query.
 
     Per `section 3.5.3`_ of the spec.
@@ -128,7 +131,23 @@ def prepare_request_uri_query(oauth_params, uri):
     .. _`section 3.5.3`: http://tools.ietf.org/html/rfc5849#section-3.5.3
 
     """
+    new_request = request.clone()
+
     # append OAuth params to the existing set of query components
-    sch, net, path, par, query, fra = urlparse(uri)
-    query = urlencode(_append_params(oauth_params, extract_params(query) or []))
-    return urlunparse((sch, net, path, par, query, fra))
+    sch, net, path, par, query, fra = urlparse(new_request.uri)
+    query = urlencode(_append_params(new_request.oauth_params,
+        extract_params(query) or []))
+    new_request.uri = urlunparse((sch, net, path, par, query, fra))
+    return new_request
+
+
+PREPARE_BY_SIGNATURE_TYPE = {
+    constants.SIGNATURE_TYPE_AUTH_HEADER: prepare_header,
+    constants.SIGNATURE_TYPE_QUERY: prepare_form_encoded_body,
+    constants.SIGNATURE_TYPE_BODY: prepare_request_uri_query,
+}
+
+
+def prepare_request(request, signature_type):
+    return PREPARE_BY_SIGNATURE_TYPE[signature_type](request)
+

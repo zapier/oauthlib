@@ -9,6 +9,7 @@ This module provides data structures and utilities common
 to all implementations of OAuth.
 """
 
+import copy
 import re
 import urllib
 import urlparse
@@ -153,3 +154,9 @@ class Request(object):
     def uri_query_params(self):
         return urlparse.parse_qsl(self.uri_query, keep_blank_values=True,
                                   strict_parsing=True)
+
+    def clone(self):
+        return Request(self.uri, http_method=self.http_method,
+            body=self.body,
+            headers=copy.copy(self.headers))
+
