@@ -48,8 +48,6 @@ class Client(object):
             return signature.sign_plaintext(self.client_secret,
                 self.resource_owner_secret)
 
-        # XXX hack to make sure oauth params are included in the info
-        # passed to collect_parameters below. Is there a cleaner way?
         request = self._render(request)
 
         collected_params = signature.collect_parameters(request)
@@ -66,12 +64,15 @@ class Client(object):
         logging.debug("Base signing string: {0}".format(base_string))
 
         if self.signature_method == constants.SIGNATURE_METHOD_HMAC:
-            return signature.sign_hmac_sha1(base_string, self.client_secret,
+            sig = signature.sign_hmac_sha1(base_string, self.client_secret,
                 self.resource_owner_secret)
         elif self.signature_method == constants.SIGNATURE_METHOD_RSA:
-            return signature.sign_rsa_sha1(base_string, self.rsa_key)
+            sig = signature.sign_rsa_sha1(base_string, self.rsa_key)
         else:
             raise ValueError("Unknown signature method: %s" % self.signature_method)
+
+        logging.debug("Signature: {0}".format(sig))
+        return sig
 
     def get_oauth_params(self):
         """Get the basic OAuth parameters to be used in generating a signature.

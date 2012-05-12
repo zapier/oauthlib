@@ -13,11 +13,13 @@ def fread(fn):
     with open(join(dirname(__file__), fn), 'r') as f:
         return f.read()
 
-tests_require = ['nose', 'unittest2', 'pycrypto']
+tests_require = ['nose', 'unittest2', 'rsa']
+
+requires = ['rsa']
 
 setup(
     name='oauthlib',
-    version='0.0.2',
+    version='0.1.3',
     description='A generic, spec-compliant, thorough implementation of the OAuth request-signing logic',
     long_description=fread('README.rst'),
     author='Idan Gazit',
@@ -28,4 +30,5 @@ setup(
     test_suite='nose.collector',
     tests_require=tests_require,
     extras_require={'test': tests_require},
+    install_requires=requires,
 )
