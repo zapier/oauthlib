@@ -96,13 +96,11 @@ class Client(object):
     def _render(self, request, formencode=False):
         """Render a signed request according to signature type
 
-        Returns a 3-tuple containing the request URI, headers, and body.
+        Returns a rendered Request instance.
 
         If the formencode argument is True and the body contains parameters, it
         is escaped and returned as a valid formencoded string.
         """
-        # TODO what if there are body params on a header-type auth?
-        # TODO what if there are query params on a body-type auth?
         return parameters.prepare_request(request, self.signature_type)
 
     def sign(self, uri, http_method=u'GET', body=None, headers=None):
@@ -190,29 +188,6 @@ class Server(object):
     def get_resource_owner_secret(self, resource_owner_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def get_signature_type_and_params(self, uri_query, headers, body):
-        signature_types_with_oauth_params = filter(lambda s: s[1], (
-            (constants.SIGNATURE_TYPE_AUTH_HEADER, utils.filter_oauth_params(
-                signature.collect_parameters(headers=headers,
-                exclude_oauth_signature=False))),
-            (constants.SIGNATURE_TYPE_BODY, utils.filter_oauth_params(
-                signature.collect_parameters(body=body,
-                exclude_oauth_signature=False))),
-            (constants.SIGNATURE_TYPE_QUERY, utils.filter_oauth_params(
-                signature.collect_parameters(uri_query=uri_query,
-                exclude_oauth_signature=False))),
-        ))
-
-        if len(signature_types_with_oauth_params) > 1:
-            raise ValueError('oauth_ params must come from only 1 signature type but were found in %s' % ', '.join(
-                [s[0] for s in signature_types_with_oauth_params]))
-        try:
-            signature_type, params = signature_types_with_oauth_params[0]
-        except IndexError:
-            raise ValueError('oauth_ params are missing. Could not determine signature type.')
-
-        return signature_type, dict(params)
-
     def check_client_key(self, client_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
@@ -234,13 +209,11 @@ class Server(object):
 
         .. _`section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
         """
-        headers = headers or {}
-        signature_type = None
-        # FIXME: urlparse does not return unicode!
-        uri_query = urlparse.urlparse(uri).query
-
-        signature_type, params = self.get_signature_type_and_params(uri_query,
-            headers, body)
+        request = Request(uri, http_method=http_method, body=body,
+            headers=headers)
+        signature_type = parameters.get_signature_type(request)
+        params = signature.collect_parameters(request,
+            exclude_oauth_signature=False)
 
         # the parameters may not include duplicate oauth entries
         filtered_params = utils.filter_oauth_params(params)
@@ -307,10 +280,11 @@ class Server(object):
                 signature_type=signature_type,
                 verifier=verifier)
 
-        request = Request(uri, http_method, body, headers)
-        request.oauth_params = params
+        new_request = request.clone()
+        new_request.oauth_params = params.items()
 
-        client_signature = oauth_client.get_oauth_signature(request)
+        client_signature = oauth_client.get_oauth_signature(new_request)
 
         # FIXME: use near constant time string compare to avoid timing attacks
         return client_signature == request_signature
+

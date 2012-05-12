@@ -152,8 +152,11 @@ class Request(object):
 
     @property
     def uri_query_params(self):
-        return urlparse.parse_qsl(self.uri_query, keep_blank_values=True,
-                                  strict_parsing=True)
+        if self.uri_query:
+            return urlparse.parse_qsl(self.uri_query, keep_blank_values=True,
+                                      strict_parsing=True)
+        else:
+            return []
 
     @property
     def urlencoded_body(self):

@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import urllib
 
 from oauthlib.oauth1.rfc5849.signature import *
+from oauthlib.common import Request
 from ...unittest import TestCase
 
 
@@ -85,16 +86,14 @@ class SignatureTests(TestCase):
         """ We check against parameters multiple times in case things change after more
                 parameters are added.
         """
-        # check against empty parameters
-        # check against empty parameters
-        # check against empty parameters
-        self.assertEquals(collect_parameters(), [])
+
+        uri = u'http://example.com/request?%s' % self.uri_query
 
         # Check against uri_query
         # Check against uri_query
         # Check against uri_query
-
-        parameters = collect_parameters(uri_query=self.uri_query)
+        request = Request(uri)
+        parameters = collect_parameters(request)
 
         self.assertEquals(len(parameters), 6)
         self.assertEquals(parameters[0], ('b5', '=%3D'))
@@ -108,9 +107,10 @@ class SignatureTests(TestCase):
         # check against authorization header as well
         # check against authorization header as well
 
-        parameters = collect_parameters(uri_query=self.uri_query, headers={
+        request = Request(uri, headers={
             'Authorization': self.authorization_header,
         })
+        parameters = collect_parameters(request)
 
         # Redo the checks against all the parameters. Duplicated code but better safety
         self.assertEquals(len(parameters), 11)
@@ -129,10 +129,10 @@ class SignatureTests(TestCase):
         # Add in the body.
         # TODO - add more valid content for the body. Daniel Greenfeld 2012/03/12
         # Redo again the checks against all the parameters. Duplicated code but better safety
-        parameters = collect_parameters(uri_query=self.uri_query,
-            body=self.body, headers={
-                'Authorization': self.authorization_header,
-            })
+        request = Request(uri, body=self.body, headers={
+            'Authorization': self.authorization_header,
+        })
+        parameters = collect_parameters(request)
         self.assertEquals(len(parameters), 12)
         self.assertEquals(parameters[0], ('b5', '=%3D'))
         self.assertEquals(parameters[1], ('a3', 'a'))
@@ -150,11 +150,13 @@ class SignatureTests(TestCase):
     def test_normalize_parameters(self):
         """ We copy some of the variables from the test method above."""
 
+        uri = u'http://example.com/request?%s' % self.uri_query
+
         # Create the parameters
-        parameters = collect_parameters(uri_query=unicode(self.uri_query),
-            body=unicode(self.body), headers={
-                u'Authorization': unicode(self.authorization_header),
-            })
+        request = Request(uri, body=unicode(self.body), headers={
+            u'Authorization': unicode(self.authorization_header),
+        })
+        parameters = collect_parameters(request)
         normalized = normalize_parameters(parameters)
 
         # check the parameters type

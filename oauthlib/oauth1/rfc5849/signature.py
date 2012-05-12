@@ -167,8 +167,7 @@ def normalize_base_string_uri(uri):
 #
 #    .. _`section 3.4.1.3`: http://tools.ietf.org/html/rfc5849#section-3.4.1.3
 
-def collect_parameters(uri_query='', body=[], headers=None,
-        exclude_oauth_signature=True):
+def collect_parameters(request, exclude_oauth_signature=True):
     """**Parameter Sources**
 
     Parameters starting with `oauth_` will be unescaped.
@@ -226,7 +225,7 @@ def collect_parameters(uri_query='', body=[], headers=None,
 
     .. _`section 3.4.1.3.1`: http://tools.ietf.org/html/rfc5849#section-3.4.1.3.1
     """
-    headers = headers or {}
+    headers = request.headers or {}
     params = []
 
     # The parameters from the following sources are collected into a single
@@ -240,9 +239,9 @@ def collect_parameters(uri_query='', body=[], headers=None,
     #    `W3C.REC-html40-19980424`_, Section 17.13.4.
     #
     # .. _`RFC3986, Section 3.4`: http://tools.ietf.org/html/rfc3986#section-3.4
-    # .. _`W3C.REC-html40-19980424`: http://tools.ietf.org/html/rfc5849#ref-W3C.REC-html40-19980424
-    if uri_query:
-        params.extend(urlparse.parse_qsl(uri_query, keep_blank_values=True))
+    # .. _`W3C.REC-html40-19i980424`: http://tools.ietf.org/html/rfc5849#ref-W3C.REC-html40-19980424
+    if request.uri_query:
+        params.extend(urlparse.parse_qsl(request.uri_query, keep_blank_values=True))
 
     # *  The OAuth HTTP "Authorization" header field (`Section 3.5.1`_) if
     #    present.  The header's content is parsed into a list of name/value
@@ -271,7 +270,7 @@ def collect_parameters(uri_query='', body=[], headers=None,
     # .._`W3C.REC-html40-19980424`: http://tools.ietf.org/html/rfc5849#ref-W3C.REC-html40-19980424
 
     # TODO: enforce header param inclusion conditions
-    bodyparams = extract_params(body) or []
+    bodyparams = extract_params(request.body) or []
     params.extend(bodyparams)
 
     # ensure all oauth params are unescaped

@@ -14,6 +14,53 @@ from urlparse import urlparse, urlunparse
 from . import constants, utils
 from oauthlib.common import extract_params, urlencode
 
+def get_signature_type(request):
+    """**Determine the signature type of a request**
+    Per `section 3.5`_ of the spec.
+
+    .. _`section 3.5`: http://tools.ietf.org/html/rfc5849#section-3.5
+    """
+    signature_types = []
+
+    # When making an OAuth-authenticated request, protocol parameters as
+    # well as any other parameter using the "oauth_" prefix SHALL be
+    # included in the request using one and only one of the following
+    # locations, listed in order of decreasing preference:
+
+    # 1.  The HTTP "Authorization" header field as described in
+    #     `Section 3.5.1`_.
+    #
+    # .. _`Section 3.5.1`: http://tools.ietf.org/html/rfc5849#section-3.5.1
+    if request.headers:
+        headers_lower = dict(
+            (k.lower(), v) for k, v in request.headers.items())
+        authorization_header = headers_lower.get(u'authorization')
+        if authorization_header is not None:
+            header_oauth_params = utils.filter_oauth_params(
+                utils.parse_authorization_header(authorization_header))
+            if header_oauth_params:
+                signature_types.append(constants.SIGNATURE_TYPE_AUTH_HEADER)
+
+    # 2.  The HTTP request entity-body as described in `Section 3.5.2`_.
+    #
+    # .. _`Section 3.5.2`: http://tools.ietf.org/html/rfc5849#section-3.5.2
+    if utils.filter_oauth_params(extract_params(request.body) or []):
+        signature_types.append(constants.SIGNATURE_TYPE_BODY)
+
+    # 3.  The HTTP request URI query as described in `Section 3.5.3`_.
+    #
+    # .. _`Section 3.5.3`: http://tools.ietf.org/html/rfc5849#section-3.5.3
+    if utils.filter_oauth_params(request.uri_query_params):
+        signature_types.append(constants.SIGNATURE_TYPE_QUERY)
+
+    if len(signature_types) > 1:
+        raise ValueError('oauth_ params must come from only 1 signature type but were found in %s' % ', '.join(
+            signature_types))
+    try:
+        return signature_types[0]
+    except IndexError:
+        raise ValueError('oauth_ params are missing. Could not determine signature type.')
+
 
 def prepare_headers(request, realm=None):
     """**Prepare the Authorization header.**
