@@ -5,6 +5,8 @@ oauthlib.oauth2.draft_25
 This module is an implementation of various logic needed
 for signing and checking OAuth 2.0 draft 25 requests.
 """
+from oauthlib.common import add_params_to_uri, generate_token
+from oauthlib.uri_validate import is_absolute_uri
 from tokens import prepare_bearer_uri, prepare_bearer_headers
 from tokens import prepare_bearer_body, prepare_mac_header
 from parameters import prepare_grant_uri, prepare_token_request
@@ -518,5 +520,278 @@ class PasswordCredentialsClient(Client):
         return response
 
 
-class Server(object):
+class OAuth2Error(Exception):
+# TODO: move into error.py
+
+    def __init__(self, description=None, uri=None, state=None):
+        """
+        description:    A human-readable ASCII [USASCII] text providing
+                        additional information, used to assist the client
+                        developer in understanding the error that occurred.
+                        Values for the "error_description" parameter MUST NOT
+                        include characters outside the set
+                        %x20-21 / %x23-5B / %x5D-7E.
+
+        uri:    A URI identifying a human-readable web page with information
+                about the error, used to provide the client developer with
+                additional information about the error.  Values for the
+                "error_uri" parameter MUST conform to the URI- Reference
+                syntax, and thus MUST NOT include characters outside the set
+                %x21 / %x23-5B / %x5D-7E.
+
+        state:  A CSRF protection value received from the client.
+        """
+        self.description = description
+        self.uri = uri
+        self.state = state
+
+    @property
+    def twotuples(self):
+        error = [(u'error', self.error)]
+        if self.description:
+            error.append((u'error_description', self.description))
+        if self.uri:
+            error.append((u'error_uri', self.uri))
+        if self.state:
+            error.append((u'state', self.state))
+        return error
+
+    @property
+    def urlencoded(self):
+        pass
+
+    @property
+    def json(self):
+        pass
+
+    def add_to_uri(self, uri):
+        return add_params_to_uri(uri, self.twotuples)
+
+
+class AuthorizationEndpoint(object):
+    """Authorization endpoint - used by the client to obtain authorization
+    from the resource owner via user-agent redirection.
+
+    The authorization endpoint is used to interact with the resource
+    owner and obtain an authorization grant.  The authorization server
+    MUST first verify the identity of the resource owner.  The way in
+    which the authorization server authenticates the resource owner (e.g.
+    username and password login, session cookies) is beyond the scope of
+    this specification.
+
+    The endpoint URI MAY include an "application/x-www-form-urlencoded"
+    formatted (per Appendix B) query component ([RFC3986] section 3.4),
+    which MUST be retained when adding additional query parameters.  The
+    endpoint URI MUST NOT include a fragment component.
+
+    Since requests to the authorization endpoint result in user
+    authentication and the transmission of clear-text credentials (in the
+    HTTP response), the authorization server MUST require the use of TLS
+    as described in Section 1.6 when sending requests to the
+    authorization endpoint.
+
+    The authorization server MUST support the use of the HTTP "GET"
+    method [RFC2616] for the authorization endpoint, and MAY support the
+    use of the "POST" method as well.
+
+    Parameters sent without a value MUST be treated as if they were
+    omitted from the request.  The authorization server MUST ignore
+    unrecognized request parameters.  Request and response parameters
+    MUST NOT be included more than once.
+    """
+
+    class InvalidRequestError(OAuth2Error):
+        """The request is missing a required parameter, includes an invalid
+        parameter value, includes a parameter more than once, or is
+        otherwise malformed.
+        """
+        error = u'invalid_request'
+
+    class UnauthorizedClientError(OAuth2Error):
+        """The client is not authorized to request an authorization code using
+        this method.
+        """
+        error = u'unauthorized_client'
+
+    class AccessDeniedError(OAuth2Error):
+        """The resource owner or authorization server denied the request."""
+        error = u'access_denied'
+
+    class UnsupportedResponseTypeError(OAuth2Error):
+        """The authorization server does not support obtaining an authorization
+        code using this method.
+        """
+        error = u'unsupported_response_type'
+
+    class InvalidScopeError(OAuth2Error):
+        """The requested scope is invalid, unknown, or malformed."""
+        error = u'invalid_scope'
+
+    class ServerError(OAuth2Error):
+        """The authorization server encountered an unexpected condition that
+        prevented it from fulfilling the request.  (This error code is needed
+        because a 500 Internal Server Error HTTP status code cannot be returned
+        to the client via a HTTP redirect.)
+        """
+        error = u'server_error'
+
+    class TemporarilyUnvailableError(OAuth2Error):
+        """The authorization server is currently unable to handle the request
+        due to a temporary overloading or maintenance of the server.
+        (This error code is needed because a 503 Service Unavailable HTTP
+        status code cannot be returned to the client via a HTTP redirect.)
+        """
+        error = u'temporarily_unavailable'
+
+    def __init__(self, valid_scopes=None):
+        self.valid_scopes = valid_scopes
+        self.state = None
+
+    @property
+    def response_type_handlers(self):
+        return {
+            u'code': self.authorization_code_handler,
+            u'token': self.implicit_handler,
+        }
+
+    def authorization_code_handler(self, params):
+        self.grant = self.generate_authorization_grant()
+        return add_params_to_uri(self.redirect_uri, self.grant.items())
+
+    def generate_authorization_grant(self):
+        """Generates an authorization grant represented as a dictionary."""
+        grant = {u'code': generate_token()}
+        if self.state:
+            grant[u'state'] = self.state
+        return grant
+
+    def save_authorization_grant(self, client_id, code, state=None):
+        """Saves authorization codes for later use by the token endpoint.
+
+        code:   The authorization code generated by the authorization server.
+                The authorization code MUST expire shortly after it is issued
+                to mitigate the risk of leaks. A maximum authorization code
+                lifetime of 10 minutes is RECOMMENDED.
+
+        state:  A CSRF protection value received from the client.
+        """
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def generate_implicit_grant(self):
+        pass
+
+    def save_implicit_grant(self, client_id, creds):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def implicit_handler(self, params):
+        self.grant = self.generate_implicit_grant()
+        return add_params_to_uri(self.redirect_uri, self.grant.items())
+
+    # in django, use decorate like @before_authorization
+    def parse_authorization_parameters(self, uri):
+        self.params = params_from_uri(uri)
+        self.client_id = self.params.get(u'client_id', None)
+        self.scopes = self.params.get(u'scope', None)
+        self.redirect_uri = self.params.get(u'redirect_uri', None)
+        self.response_type = self.params.get(u'response_type')
+        self.state = self.params.get(u'state')
+        self.validate_authorization_parameters()
+
+    def validate_authorization_parameters(self):
+
+        if not self.client_id:
+            raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+                    description=u'Missing client_id parameter.')
+
+        if not self.response_type:
+            raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+                    description=u'Missing response_type parameter.')
+
+        if not self.validate_client(self.client_id):
+            raise AuthorizationEndpoint.UnauthorizedClientError(state=self.state)
+
+        if not self.response_type in self.response_type_handlers:
+            raise AuthorizationEndpoint.UnsupportedResponseTypeError(state=self.state)
+
+        if self.scopes:
+            if not self.validate_scopes(self.client_id, self.scopes):
+                raise AuthorizationEndpoint.InvalidScopeError(state=self.state)
+        else:
+            self.scopes = self.get_default_scopes(self.client_id)
+
+        if self.redirect_uri:
+            if not is_absolute_uri(self.redirect_uri):
+                raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+                        description=u'Non absolute redirect URI. See RFC3986')
+
+            if not self.validate_redirect_uri(self.client_id, self.redirect_uri):
+                raise AuthorizationEndpoint.AccessDeniedError(state=self.state)
+        else:
+            self.redirect_uri = self.get_default_redirect_uri(self.client_id)
+            if not self.redirect_uri:
+                raise AuthorizationEndpoint.AccessDeniedError(state=self.state)
+
+        return True
+
+    def validate_authorized_scopes(self, authorized_scopes):
+        self.authorized_scopes = authorized_scopes
+
+    def create_authorization_response(self, authorized_scopes):
+        self.scopes = authorized_scopes
+        try:
+            self.validate_authorization_parameters()
+
+        except OAuth2Error as error:
+            return error.add_to_uri(self.redirect_uri)
+
+        return self.response_type_handlers.get(self.response_type)(self.params)
+
+    def validate_client(self, client_id):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def validate_scopes(self, client_id, scopes):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def validate_redirect_uri(self, client_id, redirect_uri):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def get_default_redirect_uri(self, client_id):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def get_default_scopes(self, client_id):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+
+def params_from_uri(uri):
+    import urlparse
+    query = urlparse.urlparse(uri).query
+    params = dict(urlparse.parse_qsl(query))
+    if u'scope' in params:
+        params[u'scope'] = params[u'scope'].split(u' ')
+    return params
+
+
+class TokenEndpoint(object):
+
+    def access_token(self, uri, body, http_method=u'GET', headers=None):
+        """Validate client, code etc, return body + headers"""
+        pass
+
+    def validate_authorization_code(self, client_id):
+        """Validate the authorization code.
+
+        The client MUST NOT use the authorization code more than once. If an
+        authorization code is used more than once, the authorization server
+        MUST deny the request and SHOULD revoke (when possible) all tokens
+        previously issued based on that authorization code. The authorization
+        code is bound to the client identifier and redirection URI.
+        """
+        pass
+
+
+class ResourceEndpoint(object):
+    pass
+
+
+class Server(AuthorizationEndpoint, TokenEndpoint, ResourceEndpoint):
     pass
