@@ -51,6 +51,12 @@ class AuthorizationEndpointTest(TestCase):
         def get_default_redirect_uri(self, client_id):
             return u'http://default.redirect/uri'
 
+        def save_authorization_grant(self, client_id, grant, state=None):
+            pass
+
+        def save_implicit_grant(self, client_id, grant, state=None):
+            pass
+
     def test_authorization_parameters(self):
 
         tests = ((self.uri, None, []),
@@ -90,7 +96,6 @@ class AuthorizationEndpointTest(TestCase):
             ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
             ae.parse_authorization_parameters(uri)
             uri = ae.create_authorization_response(self.scopes_decoded)
-            self.assertIsNotNone(ae.grant)
             self.assertIn(u'state', uri)
             self.assertIn(u'code', uri)
             for value in extras:
@@ -104,7 +109,6 @@ class AuthorizationEndpointTest(TestCase):
             ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
             ae.parse_authorization_parameters(uri)
             uri = ae.create_authorization_response(self.scopes_decoded)
-            self.assertIsNotNone(ae.grant)
             self.assertIn(u'access_token', uri)
             self.assertIn(u'token_type', uri)
             self.assertIn(u'expires_in', uri)
@@ -115,24 +119,25 @@ class AuthorizationEndpointTest(TestCase):
     def test_authorization_error_response(self):
 
         tests = ((u'client_id', None, u'invalid_request'),
-                 (u'response_type', u'invalid', u'unsupported_response_type'),
                  (u'validate_client', lambda *x: False, u'unauthorized_client'),
                  (u'validate_scopes', lambda *x: False, u'invalid_scope'),
                  (u'validate_redirect_uri', lambda *x: False, u'access_denied'))
 
-        for name, attr, result in tests:
-            ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
-            ae.parse_authorization_parameters(self.uri)
-            setattr(ae, name, attr)
-            uri = ae.create_authorization_response(self.scopes_decoded)
-            self.assertIn(u'error', uri)
-            self.assertIn(result, uri)
+        for uri in (self.uri, self.implicit_uri):
+            for name, attr, result in tests:
+                ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
+                ae.parse_authorization_parameters(uri)
+                setattr(ae, name, attr)
+                response_uri = ae.create_authorization_response(self.scopes_decoded)
+                self.assertIn(u'error', response_uri)
+                self.assertIn(result, response_uri)
 
     def test_not_implemented(self):
         ae = AuthorizationEndpoint()
-        self.assertRaises(NotImplementedError, ae.save_authorization_grant, None, None)
         self.assertRaises(NotImplementedError, ae.validate_client, None)
         self.assertRaises(NotImplementedError, ae.validate_scopes, None, None)
         self.assertRaises(NotImplementedError, ae.validate_redirect_uri, None, None)
         self.assertRaises(NotImplementedError, ae.get_default_scopes, None)
         self.assertRaises(NotImplementedError, ae.get_default_redirect_uri, None)
+        self.assertRaises(NotImplementedError, ae.save_authorization_grant, None, None)
+        self.assertRaises(NotImplementedError, ae.save_implicit_grant, None, None)
