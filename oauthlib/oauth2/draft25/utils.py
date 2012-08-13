@@ -8,6 +8,8 @@ This module contains utility methods used by various parts of the OAuth 2 spec.
 import urllib
 import urlparse
 
+from oauthlib.common import urldecode
+
 
 def scope_to_string(scope):
     """Convert a list of scopes to a space separated string."""
@@ -44,6 +46,14 @@ def host_from_uri(uri):
         port = default_ports.get(sch.upper())
 
     return netloc, port
+
+
+def params_from_uri(uri):
+    query = urlparse.urlparse(uri).query
+    params = dict(urldecode(query))
+    if u'scope' in params:
+        params[u'scope'] = scope_to_list(params[u'scope'])
+    return params
 
 
 def escape(u):

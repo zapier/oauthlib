@@ -5,14 +5,18 @@ oauthlib.oauth2.draft_25
 This module is an implementation of various logic needed
 for signing and checking OAuth 2.0 draft 25 requests.
 """
-from oauthlib.common import add_params_to_uri, generate_token
+from oauthlib.common import Request
 from oauthlib.uri_validate import is_absolute_uri
-from tokens import prepare_bearer_uri, prepare_bearer_headers
-from tokens import prepare_bearer_body, prepare_mac_header
+from errors import OAuth2Error
+from grant_types import AuthorizationCodeGrantTokenHandler
 from parameters import prepare_grant_uri, prepare_token_request
 from parameters import parse_authorization_code_response
 from parameters import parse_implicit_response, parse_token_response
-
+from response_types import AuthorizationCodeGrantCodeHandler, ImplicitGrantTokenHandler
+from tokens import BearerTokenHandler
+from tokens import prepare_bearer_uri, prepare_bearer_headers
+from tokens import prepare_bearer_body, prepare_mac_header
+from utils import params_from_uri
 
 AUTH_HEADER = u'auth_header'
 URI_QUERY = u'query'
@@ -520,51 +524,6 @@ class PasswordCredentialsClient(Client):
         return response
 
 
-class OAuth2Error(Exception):
-# TODO: move into error.py
-
-    def __init__(self, description=None, uri=None, state=None):
-        """
-        description:    A human-readable ASCII [USASCII] text providing
-                        additional information, used to assist the client
-                        developer in understanding the error that occurred.
-                        Values for the "error_description" parameter MUST NOT
-                        include characters outside the set
-                        %x20-21 / %x23-5B / %x5D-7E.
-
-        uri:    A URI identifying a human-readable web page with information
-                about the error, used to provide the client developer with
-                additional information about the error.  Values for the
-                "error_uri" parameter MUST conform to the URI- Reference
-                syntax, and thus MUST NOT include characters outside the set
-                %x21 / %x23-5B / %x5D-7E.
-
-        state:  A CSRF protection value received from the client.
-        """
-        self.description = description
-        self.uri = uri
-        self.state = state
-
-    @property
-    def twotuples(self):
-        error = [(u'error', self.error)]
-        if self.description:
-            error.append((u'error_description', self.description))
-        if self.uri:
-            error.append((u'error_uri', self.uri))
-        if self.state:
-            error.append((u'state', self.state))
-        return error
-
-    @property
-    def urlencoded(self):
-        pass
-
-    @property
-    def json(self):
-        pass
-
-
 class AuthorizationEndpoint(object):
     """Authorization endpoint - used by the client to obtain authorization
     from the resource owner via user-agent redirection.
@@ -642,68 +601,71 @@ class AuthorizationEndpoint(object):
 
     def __init__(self, valid_scopes=None):
         self.valid_scopes = valid_scopes
-        self.state = None
 
     @property
     def response_type_handlers(self):
         return {
-            u'code': AuthorizationGrantCodeHandler(),
-            u'token': ImplicitGrantHandler(),
+            u'code': AuthorizationCodeGrantCodeHandler(),
+            u'token': ImplicitGrantTokenHandler(),
         }
 
-    def parse_authorization_parameters(self, uri):
-        self.params = params_from_uri(uri)
-        self.client_id = self.params.get(u'client_id', None)
-        self.scopes = self.params.get(u'scope', None)
-        self.redirect_uri = self.params.get(u'redirect_uri', None)
-        self.response_type = self.params.get(u'response_type')
-        self.state = self.params.get(u'state')
-        self.validate_authorization_parameters()
+    @property
+    def token_handler(self):
+        return BearerTokenHandler()
 
-    def validate_authorization_parameters(self):
+    def parse_authorization_parameters(self, uri, http_method=u'GET', body=None, headers=None):
+        self.request = Request(uri, http_method=http_method, body=body, headers=headers)
+        self.request.params = params_from_uri(self.request.uri)
+        self.request.client_id = self.request.params.get(u'client_id', None)
+        self.request.scopes = self.request.params.get(u'scope', None)
+        self.request.redirect_uri = self.request.params.get(u'redirect_uri', None)
+        self.request.response_type = self.request.params.get(u'response_type')
+        self.request.state = self.request.params.get(u'state')
+        self.validate_request(self.request)
 
-        if not self.client_id:
-            raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+    def validate_request(self, request):
+
+        if not request.client_id:
+            raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
                     description=u'Missing client_id parameter.')
 
-        if not self.response_type:
-            raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+        if not request.response_type:
+            raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
                     description=u'Missing response_type parameter.')
 
-        if not self.validate_client(self.client_id):
-            raise AuthorizationEndpoint.UnauthorizedClientError(state=self.state)
+        if not self.validate_client(request.client_id):
+            raise AuthorizationEndpoint.UnauthorizedClientError(state=request.state)
 
-        if not self.response_type in self.response_type_handlers:
-            raise AuthorizationEndpoint.UnsupportedResponseTypeError(state=self.state)
+        if not request.response_type in self.response_type_handlers:
+            raise AuthorizationEndpoint.UnsupportedResponseTypeError(state=request.state)
 
-        if self.scopes:
-            if not self.validate_scopes(self.client_id, self.scopes):
-                raise AuthorizationEndpoint.InvalidScopeError(state=self.state)
+        if request.scopes:
+            if not self.validate_scopes(request.client_id, request.scopes):
+                raise AuthorizationEndpoint.InvalidScopeError(state=request.state)
         else:
-            self.scopes = self.get_default_scopes(self.client_id)
+            request.scopes = self.get_default_scopes(request.client_id)
 
-        if self.redirect_uri:
-            if not is_absolute_uri(self.redirect_uri):
-                raise AuthorizationEndpoint.InvalidRequestError(state=self.state,
+        if request.redirect_uri:
+            if not is_absolute_uri(request.redirect_uri):
+                raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
                         description=u'Non absolute redirect URI. See RFC3986')
 
-            if not self.validate_redirect_uri(self.client_id, self.redirect_uri):
-                raise AuthorizationEndpoint.AccessDeniedError(state=self.state)
+            if not self.validate_redirect_uri(request.client_id, request.redirect_uri):
+                raise AuthorizationEndpoint.AccessDeniedError(state=request.state)
         else:
-            self.redirect_uri = self.get_default_redirect_uri(self.client_id)
-            if not self.redirect_uri:
-                raise AuthorizationEndpoint.AccessDeniedError(state=self.state)
+            request.redirect_uri = self.get_default_redirect_uri(request.client_id)
+            if not request.redirect_uri:
+                raise AuthorizationEndpoint.AccessDeniedError(state=request.state)
 
         return True
 
     def create_authorization_response(self, authorized_scopes):
-        self.scopes = authorized_scopes
-
-        if not self.response_type in self.response_type_handlers:
+        self.request.scopes = authorized_scopes
+        if not self.request.response_type in self.response_type_handlers:
             raise AuthorizationEndpoint.UnsupportedResponseTypeError(
-                    state=self.state, description=u'Invalid response type')
+                    state=self.request.state, description=u'Invalid response type')
 
-        return self.response_type_handlers.get(self.response_type)(self)
+        return self.response_type_handlers.get(self.request.response_type)(self)
 
     def validate_client(self, client_id):
         raise NotImplementedError('Subclasses must implement this method.')
@@ -736,93 +698,83 @@ class AuthorizationEndpoint(object):
         raise NotImplementedError('Subclasses must implement this method.')
 
 
-def params_from_uri(uri):
-    import urlparse
-    query = urlparse.urlparse(uri).query
-    params = dict(urlparse.parse_qsl(query))
-    if u'scope' in params:
-        params[u'scope'] = params[u'scope'].split(u' ')
-    return params
-
-
-class AuthorizationGrantCodeHandler(object):
-
-    def __call__(self, endpoint):
-        self.endpoint = endpoint
-        try:
-            self.endpoint.validate_authorization_parameters()
-
-        except OAuth2Error as e:
-            return add_params_to_uri(self.endpoint.redirect_uri, e.twotuples)
-
-        self.grant = self.create_authorization_grant()
-        self.endpoint.save_authorization_grant(
-                self.endpoint.client_id, self.grant, state=self.endpoint.state)
-        return add_params_to_uri(self.endpoint.redirect_uri, self.grant.items())
-
-    def create_authorization_grant(self):
-        """Generates an authorization grant represented as a dictionary."""
-        grant = {u'code': generate_token()}
-        if self.endpoint.state:
-            grant[u'state'] = self.endpoint.state
-        return grant
-
-
-class ImplicitGrantHandler(object):
-
-    @property
-    def expires_in(self):
-        return 3600
-
-    @property
-    def token_type(self):
-        return u'Bearer'
-
-    def create_implicit_grant(self):
-        return {
-            u'access_token': generate_token(),
-            u'token_type': self.token_type,
-            u'expires_in': self.expires_in,
-            u'scope': ' '.join(self.endpoint.scopes),
-            u'state': self.endpoint.state
-        }
-
-    def __call__(self, endpoint):
-        self.endpoint = endpoint
-        try:
-            self.endpoint.validate_authorization_parameters()
-
-        except OAuth2Error as e:
-            return add_params_to_uri(
-                    self.endpoint.redirect_uri, e.twotuples, fragment=True)
-
-        self.grant = self.create_implicit_grant()
-        self.endpoint.save_implicit_grant(
-                self.endpoint.client_id, self.grant, state=self.endpoint.state)
-        return add_params_to_uri(
-                self.endpoint.redirect_uri, self.grant.items(), fragment=True)
-
-
 class TokenEndpoint(object):
 
-    def access_token(self, uri, body, http_method=u'GET', headers=None):
-        """Validate client, code etc, return body + headers"""
-        pass
-
-    def validate_authorization_code(self, client_id):
-        """Validate the authorization code.
-
-        The client MUST NOT use the authorization code more than once. If an
-        authorization code is used more than once, the authorization server
-        MUST deny the request and SHOULD revoke (when possible) all tokens
-        previously issued based on that authorization code. The authorization
-        code is bound to the client identifier and redirection URI.
+    class InvalidRequestError(OAuth2Error):
+        """The request is missing a required parameter, includes an unsupported
+        parameter value (other than grant type), repeats a parameter, includes
+        multiple credentials, utilizes more than one mechanism for
+        authenticating the client, or is otherwise malformed.
         """
-        pass
+        error = u'invalid_request'
+
+    class InvalidClientError(OAuth2Error):
+        """Client authentication failed (e.g. unknown client, no client
+        authentication included, or unsupported authentication method).
+        The authorization server MAY return an HTTP 401 (Unauthorized) status
+        code to indicate which HTTP authentication schemes are supported.
+        If the client attempted to authenticate via the "Authorization" request
+        header field, the authorization server MUST respond with an
+        HTTP 401 (Unauthorized) status code, and include the "WWW-Authenticate"
+        response header field matching the authentication scheme used by the
+        client.
+        """
+        error = u'invalid_client'
+
+    class InvalidGrantError(OAuth2Error):
+        """The provided authorization grant (e.g. authorization code, resource
+        owner credentials) or refresh token is invalid, expired, revoked, does
+        not match the redirection URI used in the authorization request, or was
+        issued to another client.
+        """
+        error = u'invalid_grant'
+
+    class Unauthorized_clientError(OAuth2Error):
+        """The authenticated client is not authorized to use this authorization
+        grant type.
+        """
+        error = u'unauthorized_client'
+
+    class UnsupportedGrantTypeError(OAuth2Error):
+        """The authorization grant type is not supported by the authorization
+        server.
+        """
+        error = u'unsupported_grant_type'
+
+    class InvalidScopeError(OAuth2Error):
+        """The requested scope is invalid, unknown, malformed, or exceeds the
+        scope granted by the resource owner.
+        """
+        error = u'invalid_scope'
+
+    @property
+    def token_handler(self):
+        return BearerTokenHandler()
+
+    @property
+    def grant_type_handlers(self):
+        return {
+            u'authorization_code': AuthorizationCodeGrantTokenHandler(),
+        }
+
+    def create_token_response(self, body, http_method=u'GET', uri=None, headers=None):
+        """Validate client, code etc, return body + headers"""
+        self.request = Request(uri, http_method, body, headers)
+        self.request.params = dict(self.request.decoded_body)
+        if not u'grant_type' in self.request.params:
+            raise TokenEndpoint.InvalidRequestError(description=u'Missing grant_type parameter.')
+
+        self.request.grant_type = self.request.params.get(u'grant_type')
+        if not self.request.grant_type in self.grant_type_handlers:
+            raise TokenEndpoint.UnsupportedGrantTypeError()
+
+        return self.grant_type_handlers.get(self.request.grant_type)(self)
 
 
 class ResourceEndpoint(object):
-    pass
+    @property
+    def grant_type_handlers(self):
+        return None
 
 
 class Server(AuthorizationEndpoint, TokenEndpoint, ResourceEndpoint):

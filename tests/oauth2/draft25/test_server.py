@@ -2,7 +2,9 @@
 from __future__ import absolute_import
 from ...unittest import TestCase
 
-from oauthlib.oauth2.draft25 import AuthorizationEndpoint
+from oauthlib.oauth2.draft25 import AuthorizationEndpoint, TokenEndpoint
+from oauthlib.oauth2.draft25.grant_types import AuthorizationCodeGrantTokenHandler
+import json
 
 
 class AuthorizationEndpointTest(TestCase):
@@ -19,8 +21,8 @@ class AuthorizationEndpointTest(TestCase):
     base_uri = u'http://a.b/authorize?client_id=%s&state=%s&response_type=%s'
 
     uri = base_uri % (state, client_id, u'code')
-    uri_scope = uri + u'&scope=%s' % u' '.join(default_scope)
-    uri_scopes = uri + u'&scope=%s' % u' '.join(scopes)
+    uri_scope = uri + u'&scope=%s' % u'+'.join(default_scope)
+    uri_scopes = uri + u'&scope=%s' % u'+'.join(scopes)
     uri_redirect = uri + u'&redirect_uri=%s' % default_redirect_uri
     uri_redirect_extra = uri_redirect + u'%26extra%3Dparameter'
     uri_extra = uri_redirect + u'&extra=parameter'
@@ -29,9 +31,9 @@ class AuthorizationEndpointTest(TestCase):
     implicit_uri_redirect = implicit_uri + u'&redirect_uri=%s' % default_redirect_uri
     implicit_uri_redirect_extra = implicit_uri_redirect + u'%26extra%3Dparameter'
 
-    uri_missing = u'http%3A%2f%2fno.client.id'
+    uri_missing = u'http://no.client.id'
     uri_unsupported = u'http://a.b/?client_id=a&response_type=invalid'
-    uri_scope_invalid = uri + u'&scope=%s' % u'invalid scope'
+    uri_scope_invalid = uri + u'&scope=%s' % u'invalid%20scope'
     uri_redirect_invalid = uri_redirect + u'%23notabsolute'
 
     class SimpleAuthorizationEndpoint(AuthorizationEndpoint):
@@ -68,13 +70,13 @@ class AuthorizationEndpointTest(TestCase):
         for uri, scope, extras in tests:
             ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
             ae.parse_authorization_parameters(uri)
-            self.assertEqual(ae.response_type, u'code')
-            self.assertEqual(ae.client_id, self.client_id)
-            self.assertEqual(ae.scopes, scope or self.default_scope)
-            self.assertEqual(ae.redirect_uri, self.default_redirect_uri_decoded)
-            self.assertEqual(ae.state, self.state)
+            self.assertEqual(ae.request.response_type, u'code')
+            self.assertEqual(ae.request.client_id, self.client_id)
+            self.assertEqual(ae.request.scopes, scope or self.default_scope)
+            self.assertEqual(ae.request.redirect_uri, self.default_redirect_uri_decoded)
+            self.assertEqual(ae.request.state, self.state)
             for attr, value in extras:
-                self.assertEqual(ae.params.get(attr), value)
+                self.assertEqual(ae.request.params.get(attr), value)
 
     def test_invalid_authorization_parameters(self):
 
@@ -128,6 +130,7 @@ class AuthorizationEndpointTest(TestCase):
                 ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
                 ae.parse_authorization_parameters(uri)
                 setattr(ae, name, attr)
+                setattr(ae.request, name, attr)
                 response_uri = ae.create_authorization_response(self.scopes_decoded)
                 self.assertIn(u'error', response_uri)
                 self.assertIn(result, response_uri)
@@ -141,3 +144,38 @@ class AuthorizationEndpointTest(TestCase):
         self.assertRaises(NotImplementedError, ae.get_default_redirect_uri, None)
         self.assertRaises(NotImplementedError, ae.save_authorization_grant, None, None)
         self.assertRaises(NotImplementedError, ae.save_implicit_grant, None, None)
+
+
+class TokenEndpointTest(TestCase):
+
+    default_redirect_uri = u'http%3A%2f%2fdefault.redirect%2Furi'
+    default_redirect_uri_decoded = u'http://default.redirect/uri'
+
+    body = u'grant_type=authorization_code&code=abc'
+    body_response = json.loads('{"hello":"yes"}')
+    body_redirect = body + u'&redirect_uri=%s' % default_redirect_uri
+
+    class SimpleAuthorizationCodeTokenHandler(AuthorizationCodeGrantTokenHandler):
+
+        def validate_client(self, client, grant_type):
+            return True
+
+        def validate_code(self, client, code):
+            return True
+
+        def get_scopes(self, client, code):
+            return ['hello', 'world']
+
+    class SimpleTokenEndpoint(TokenEndpoint):
+
+        @property
+        def grant_type_handlers(self):
+            return {
+                u'authorization_code': TokenEndpointTest.SimpleAuthorizationCodeTokenHandler()
+            }
+
+    def test_authorization_token_request(self):
+        te = TokenEndpointTest.SimpleTokenEndpoint()
+        te.client = u'dummyvalue'
+        print te.create_token_response(self.body)
+        self.assertEqual(json.loads(te.create_token_response(self.body)), self.body_response)

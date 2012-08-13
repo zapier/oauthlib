@@ -233,5 +233,4 @@ class Request(object):
 
     @property
     def uri_query_params(self):
-        return urlparse.parse_qsl(self.uri_query, keep_blank_values=True,
-                                  strict_parsing=True)
+        return urldecode(self.uri_query)
