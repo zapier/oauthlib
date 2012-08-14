@@ -772,9 +772,25 @@ class TokenEndpoint(object):
 
 
 class ResourceEndpoint(object):
+
     @property
-    def grant_type_handlers(self):
-        return None
+    def token_handlers(self):
+        return {
+            u'Bearer': BearerTokenHandler(),
+        }
+
+    def verify_request(self, uri, http_method=u'GET', body=None, headers=None):
+        """Validate client, code etc, return body + headers"""
+        self.request = Request(uri, http_method, body, headers)
+        self.request.token_type = self.find_token_type(self.request)
+        if not self.request.token_type:
+            raise ValueError(u'Could not determine the token type.')
+
+        if not self.request.token_type in self.token_handlers:
+            raise ValueError(u'Unsupported token type.')
+
+        return self.token_handlers.get(
+                self.request.token_type).validate_request(self.request)
 
 
 class Server(AuthorizationEndpoint, TokenEndpoint, ResourceEndpoint):

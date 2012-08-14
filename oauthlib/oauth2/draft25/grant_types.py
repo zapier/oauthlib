@@ -31,9 +31,6 @@ class AuthorizationCodeGrantTokenHandler(object):
             raise self.endpoint.InvalidRequestError(
                     description=u'Missing code parameter.')
 
-        if not self.endpoint.client:
-            raise self.endpoint.InvalidClientError(u'unrecognized client')
-
         if not self.validate_client(self.endpoint.client, request.grant_type):
             raise self.endpoint.UnauthorizedClientError()
 

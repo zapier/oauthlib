@@ -155,6 +155,9 @@ class TokenEndpointTest(TestCase):
     body_response = json.loads('{"hello":"yes"}')
     body_redirect = body + u'&redirect_uri=%s' % default_redirect_uri
 
+    body_missing_grant_type = u'code=abc'
+    body_unsupported_grant_type = u'grant_type=invalid&code=abc'
+
     class SimpleAuthorizationCodeTokenHandler(AuthorizationCodeGrantTokenHandler):
 
         def validate_client(self, client, grant_type):
@@ -177,5 +180,17 @@ class TokenEndpointTest(TestCase):
     def test_authorization_token_request(self):
         te = TokenEndpointTest.SimpleTokenEndpoint()
         te.client = u'dummyvalue'
-        print te.create_token_response(self.body)
-        self.assertEqual(json.loads(te.create_token_response(self.body)), self.body_response)
+        response = json.loads(te.create_token_response(self.body))
+        self.assertIn(u'token_type', response)
+        self.assertIn(u'access_token', response)
+        self.assertIn(u'refresh_token', response)
+        self.assertIn(u'expires_in', response)
+
+    def test_invalid_authorization_token_request(self):
+
+        te = TokenEndpointTest.SimpleTokenEndpoint()
+        te.client = u'dummyvalue'
+        self.assertRaises(TokenEndpoint.UnsupportedGrantTypeError,
+                te.create_token_response, self.body_unsupported_grant_type)
+        self.assertRaises(TokenEndpoint.InvalidRequestError,
+                te.create_token_response, self.body_missing_grant_type)
