@@ -130,3 +130,13 @@ def prepare_bearer_body(token, body=u''):
     .. _`Bearer Token`: http://tools.ietf.org/html/draft-ietf-oauth-v2-bearer-18
     """
     return add_params_to_qs(body, [((u'access_token', token))])
+
+
+class BearerTokenHandler(object):
+
+    def __call__(self, endpoint, grant):
+        grant[u'token_type'] = u'Bearer'
+        return grant
+
+    def validate(self, parameters):
+        pass
