@@ -86,6 +86,11 @@ class AuthorizationEndpointTest(TestCase):
                  (self.uri_redirect_invalid, AuthorizationEndpoint.InvalidRequestError))
 
         for uri, error in tests:
+                 (self.uri_unsupported, errors.UnsupportedResponseTypeError),
+                 (self.uri_scope_invalid, errors.InvalidScopeError),
+                 (self.uri_redirect_invalid, errors.InvalidRequestError))
+
+        for uri, error in tests:
             ae = self.SimpleAuthorizationEndpoint(valid_scopes=self.scopes_decoded)
             self.assertRaises(error, ae.parse_authorization_parameters, uri)
 
@@ -158,7 +163,7 @@ class TokenEndpointTest(TestCase):
     body_missing_grant_type = u'code=abc'
     body_unsupported_grant_type = u'grant_type=invalid&code=abc'
 
-    class SimpleAuthorizationCodeTokenHandler(AuthorizationCodeGrantTokenHandler):
+    class SimpleAuthorizationCodeTokenHandler(AuthorizationCodeGrant):
 
         def validate_client(self, client, grant_type):
             return True
@@ -167,11 +172,6 @@ class TokenEndpointTest(TestCase):
             return True
 
         def get_scopes(self, client, code):
-            return ['hello', 'world']
-
-    class SimpleTokenEndpoint(TokenEndpoint):
-
-        @property
         def grant_type_handlers(self):
             return {
                 u'authorization_code': TokenEndpointTest.SimpleAuthorizationCodeTokenHandler()

@@ -3,10 +3,9 @@ oauthlib.oauth2.draft_25.errors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
 from oauthlib.common import generate_token, add_params_to_uri
-from oauthlib.url_validate import is_absolute_uri
-from oauthlib.oauth2.draft25 import AuthorizationEndpoint, TokenEndpoint
-from errors import OAuth2Error
+from oauthlib.uri_validate import is_absolute_uri
 import json
+import errors
 
 
 class AuthorizationBase(object):
@@ -14,56 +13,56 @@ class AuthorizationBase(object):
     def validate_request(self, request):
 
         if not request.client_id:
-            raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
+            raise errors.InvalidRequestError(state=request.state,
                     description=u'Missing client_id parameter.')
 
         if not request.response_type:
-            raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
+            raise errors.InvalidRequestError(state=request.state,
                     description=u'Missing response_type parameter.')
 
         if not self.validate_client(request.client_id):
-            raise AuthorizationEndpoint.UnauthorizedClientError(state=request.state)
+            raise errors.UnauthorizedClientError(state=request.state)
 
         if not request.response_type in self.response_type_handlers:
-            raise AuthorizationEndpoint.UnsupportedResponseTypeError(state=request.state)
+            raise errors.UnsupportedResponseTypeError(state=request.state)
 
         if request.scopes:
             if not self.validate_scopes(request.client_id, request.scopes):
-                raise AuthorizationEndpoint.InvalidScopeError(state=request.state)
+                raise errors.InvalidScopeError(state=request.state)
         else:
             request.scopes = self.get_default_scopes(request.client_id)
 
         if request.redirect_uri:
             if not is_absolute_uri(request.redirect_uri):
-                raise AuthorizationEndpoint.InvalidRequestError(state=request.state,
+                raise errors.InvalidRequestError(state=request.state,
                         description=u'Non absolute redirect URI. See RFC3986')
 
             if not self.validate_redirect_uri(request.client_id, request.redirect_uri):
-                raise AuthorizationEndpoint.AccessDeniedError(state=request.state)
+                raise errors.AccessDeniedError(state=request.state)
         else:
             request.redirect_uri = self.get_default_redirect_uri(request.client_id)
             if not request.redirect_uri:
-                raise AuthorizationEndpoint.AccessDeniedError(state=request.state)
+                raise errors.AccessDeniedError(state=request.state)
 
         return True
 
-    def validate_client(self, client_id):
+    def validate_client(self, client, *args, **kwargs):
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def validate_scopes(self, client_id, scopes):
+    def validate_scopes(self, client, scopes):
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def validate_redirect_uri(self, client_id, redirect_uri):
+    def validate_redirect_uri(self, client, redirect_uri):
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def get_default_redirect_uri(self, client_id):
+    def get_default_redirect_uri(self, client):
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def get_default_scopes(self, client_id):
+    def get_default_scopes(self, client):
         raise NotImplementedError('Subclasses must implement this method.')
 
 
-class AuthorizationCodeGrant(object):
+class AuthorizationCodeGrant(AuthorizationBase):
 
     @property
     def expires_in(self):
@@ -107,7 +106,7 @@ class AuthorizationCodeGrant(object):
         try:
             self.validate_request(request)
 
-        except OAuth2Error as e:
+        except errors.OAuth2Error as e:
             return add_params_to_uri(request.redirect_uri, e.twotuples)
 
         self.grant = self.create_authorization_grant(request)
@@ -130,7 +129,7 @@ class AuthorizationCodeGrant(object):
         try:
             self.validate_request(request)
 
-        except OAuth2Error as e:
+        except errors.OAuth2Error as e:
             return e.json
 
         self.scopes = self.get_scopes(request.client, request.code)
@@ -142,29 +141,23 @@ class AuthorizationCodeGrant(object):
     def validate_token_request(self, request):
 
         if not request.grant_type == u'authorization_code':
-            raise TokenEndpoint.UnsupportedGrantTypeError()
+            raise errors.UnsupportedGrantTypeError()
 
         if not request.code:
-            raise TokenEndpoint.InvalidRequestError(
+            raise errors.InvalidRequestError(
                     description=u'Missing code parameter.')
 
         if not self.validate_client(request.client, request.grant_type):
-            raise TokenEndpoint.UnauthorizedClientError()
+            raise errors.UnauthorizedClientError()
 
         if not self.validate_code(request.client, request.code):
-            raise TokenEndpoint.InvalidGrantError()
-
-    def validate_client(self, client, grant_type=None):
-        raise NotImplementedError('Subclasses must implement this method.')
+            raise errors.InvalidGrantError()
 
     def validate_code(self, client, code):
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def get_scopes(self, client, code):
-        raise NotImplementedError('Subclasses must implement this method.')
 
-
-class ImplicitGrant(object):
+class ImplicitGrant(AuthorizationBase):
 
     @property
     def expires_in(self):
@@ -185,7 +178,7 @@ class ImplicitGrant(object):
         try:
             self.validate_request(request)
 
-        except OAuth2Error as e:
+        except errors.OAuth2Error as e:
             return add_params_to_uri(
                     request.redirect_uri, e.twotuples, fragment=True)
 
