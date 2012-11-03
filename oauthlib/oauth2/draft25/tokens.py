@@ -161,8 +161,11 @@ class BearerToken(TokenBase):
             u'scope': ' '.join(request.scopes),
             u'token_type': u'Bearer',
         }
-        if getattr(request, u'state'):
+        if getattr(request, u'state', None):
             token[u'state'] = request.state
+
+        if refresh_token:
+            token[u'refresh_token'] = generate_token()
 
         self.save_token(request.client_id, token)
         return token

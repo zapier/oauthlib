@@ -146,13 +146,10 @@ class AuthorizationCodeGrant(GrantTypeBase):
             not self.request_validator.validate_client(request.client, request.grant_type)):
             raise errors.UnauthorizedClientError()
 
-        if not self.validate_code(request.client, request.code):
+        if not self.request_validator.validate_code(request.client, request.code):
             raise errors.InvalidGrantError()
 
     # TODO: validate scopes
-
-    def validate_code(self, client, code):
-        raise NotImplementedError('Subclasses must implement this method.')
 
 
 class ImplicitGrant(GrantTypeBase):
