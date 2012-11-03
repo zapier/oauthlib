@@ -615,6 +615,8 @@ class TokenEndpoint(object):
         if not request.grant_type in self.grant_type_handlers:
             raise TokenEndpoint.UnsupportedGrantTypeError()
 
+        # TODO: authenticate client here and populate request.client
+
         return self.grant_types.get(request.grant_type)(request,
 																											  self.default_token)
 

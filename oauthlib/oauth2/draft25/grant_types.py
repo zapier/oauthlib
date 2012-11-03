@@ -76,6 +76,7 @@ class GrantTypeBase(object):
     def create_token_response(self, request, token_handler):
         raise NotImplementedError('Subclasses must implement this method.')
 
+
 class AuthorizationCodeGrant(GrantTypeBase):
 
     @property
@@ -139,15 +140,16 @@ class AuthorizationCodeGrant(GrantTypeBase):
             raise errors.InvalidRequestError(
                     description=u'Missing code parameter.')
 
+        # TODO: document diff client & client_id, former is authenticated
+        # outside spec, i.e. http basic
         if (not hasattr(request, 'client') or
-            not self.request_validator.validate_client(request.client, 
-																											 request.grant_type)):
+            not self.request_validator.validate_client(request.client, request.grant_type)):
             raise errors.UnauthorizedClientError()
 
         if not self.validate_code(request.client, request.code):
             raise errors.InvalidGrantError()
 
-				# TODO: validate scopes
+		# TODO: validate scopes
 
     def validate_code(self, client, code):
         raise NotImplementedError('Subclasses must implement this method.')
@@ -155,8 +157,8 @@ class AuthorizationCodeGrant(GrantTypeBase):
 
 class ImplicitGrant(GrantTypeBase):
 
-		def __init__(self, request_validator=None):
-			self.request_validator = request_validator or RequestValidator()
+	def __init__(self, request_validator=None):
+		self.request_validator = request_validator or RequestValidator()
 
     def create_token_response(self, request, token_handler):
         try:
@@ -170,10 +172,11 @@ class ImplicitGrant(GrantTypeBase):
         return add_params_to_uri(
                 request.redirect_uri, self.token.items(), fragment=True)
 
+
 class ResourceOwnerPasswordCredentialsGrant(GrantTypeBase):
 
-		def __init__(self, request_validator=None):
-			self.request_validator = request_validator or RequestValidator()
+	def __init__(self, request_validator=None):
+		self.request_validator = request_validator or RequestValidator()
 
     def create_token_response(self, request, token_handler):
         try:
@@ -185,14 +188,14 @@ class ResourceOwnerPasswordCredentialsGrant(GrantTypeBase):
         return json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
-				# validate grant type, username, password, scope
-				pass
+		# validate grant type, username, password, scope
+		pass
 
 
 class ClientCredentialsGrant(GrantTypeBase):
 
-		def __init__(self, request_validator=None):
-			self.request_validator = request_validator or RequestValidator()
+	def __init__(self, request_validator=None):
+		self.request_validator = request_validator or RequestValidator()
 
     def create_token_response(self, request, token_handler):
         try:
@@ -204,5 +207,5 @@ class ClientCredentialsGrant(GrantTypeBase):
         return json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
-				# validate grant type, scope
-				pass
+		# validate grant type, scope
+		pass
