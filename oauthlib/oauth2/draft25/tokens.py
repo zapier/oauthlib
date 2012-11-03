@@ -14,7 +14,7 @@ import hashlib
 import hmac
 from urlparse import urlparse
 
-from oauthlib.common import add_params_to_uri, add_params_to_qs
+from oauthlib.common import add_params_to_uri, add_params_to_qs, generate_token
 from . import utils
 
 
@@ -132,32 +132,43 @@ def prepare_bearer_body(token, body=u''):
     return add_params_to_qs(body, [((u'access_token', token))])
 
 
-class BearerToken(object):
+class TokenBase(object):
+
+    def __call__(self, request, refresh_token=False):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def validate_request(self, request):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def estimate_type(self, request):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+
+class BearerToken(TokenBase):
 
     @property
     def expires_in(self):
         return 3600
 
-    def create_token(self, request):
-        return {
+    def save_token(self, client_id, token):
+        """Saves authorization codes for later use by the token endpoint."""
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def __call__(self, request, refresh_token=False):
+        token = {
             u'access_token': generate_token(),
             u'expires_in': self.expires_in,
             u'scope': ' '.join(request.scopes),
-            u'state': request.state
+            u'token_type': u'Bearer',
         }
-    def save_authorization_token(self, client_id, token):
-        """Saves authorization codes for later use by the token endpoint."""
-        raise NotImplementedError('Subclasses must implement this method.')
-    def create_authorization_token(self, request):
-        return {
-            u'access_token': generate_token(),
-            u'refresh_token': generate_token(),
-            u'expires_in': getattr(request, u'expires_in', self.expires_in),
-            u'scope': ' '.join(getattr(request, u'scopes', self.scopes))
-        }
-    def __call__(self, request, refresh_token=False):
-        grant[u'token_type'] = u'Bearer'
-        return grant
+        if getattr(request, u'state'):
+            token[u'state'] = request.state
 
-    def validate(self, parameters):
+        self.save_token(request.client_id, token)
+        return token
+
+    def validate_request(self, request):
+        pass
+
+    def estimate_type(self, request):
         pass

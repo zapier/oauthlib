@@ -9,7 +9,7 @@ from oauthlib.common import Request
 from parameters import prepare_grant_uri, prepare_token_request
 from parameters import parse_authorization_code_response
 from parameters import parse_implicit_response, parse_token_response
-from tokens import BearerTokenHandler
+from tokens import BearerToken
 from tokens import prepare_bearer_uri, prepare_bearer_headers
 from tokens import prepare_bearer_body, prepare_mac_header
 from utils import params_from_uri
@@ -582,8 +582,8 @@ class AuthorizationEndpoint(object):
             raise AuthorizationEndpoint.UnsupportedResponseTypeError(
                     state=request.state, description=u'Invalid response type')
 
-        return self.response_types.get(
-						request.response_type)(request, self.default_token)
+        return self.response_types.get(request.response_type)(request,
+                self.default_token)
 
 
 class TokenEndpoint(object):
@@ -609,7 +609,7 @@ class TokenEndpoint(object):
         request.params = dict(self.request.decoded_body)
         if not u'grant_type' in request.params:
             raise TokenEndpoint.InvalidRequestError(
-								description=u'Missing grant_type parameter.')
+                    description=u'Missing grant_type parameter.')
 
         request.grant_type = request.params.get(u'grant_type')
         if not request.grant_type in self.grant_type_handlers:
@@ -618,7 +618,7 @@ class TokenEndpoint(object):
         # TODO: authenticate client here and populate request.client
 
         return self.grant_types.get(request.grant_type)(request,
-																											  self.default_token)
+                self.default_token)
 
 
 class ResourceEndpoint(object):
@@ -642,10 +642,10 @@ class ResourceEndpoint(object):
 
         return self.tokens.get(request.token_type).validate_request(request)
 
-		def find_token_type(self, request):
-				estimates = sorted((t.estimate_type(request) for t in self.tokens))
-				return estimates[0] if len(estimates) else None
-				
+    def find_token_type(self, request):
+        estimates = sorted((t.estimate_type(request) for t in self.tokens))
+        return estimates[0] if len(estimates) else None
+
 
 class Server(AuthorizationEndpoint, TokenEndpoint, ResourceEndpoint):
     pass
