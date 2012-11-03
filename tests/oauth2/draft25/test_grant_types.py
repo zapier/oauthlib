@@ -71,3 +71,51 @@ class AuthorizationCodeGrantTest(TestCase):
         mock_validator.validate_code = mock.MagicMock(return_value=False)
         self.assertRaises(InvalidGrantError,
                 auth.validate_token_request, request)
+
+
+class ImplicitGrantTest(TestCase):
+
+    def test_create_token_response(self):
+        # ensure json parsable containing all we want
+        pass
+
+    def test_validate_token_response(self):
+        # wrong grant type, user, pass, scope errors
+        pass
+
+
+class ResourceOwnerPasswordCredentialsGrantTest(TestCase):
+
+    def setUp(self):
+        self.request = Request(u'http://a.b/path')
+        self.request.body = u'grant_type=password&username=john&password=doe'
+        self.mock_validator = mock.MagicMock()
+        self.auth = ImplicitGrant(request_validator=self.mock_validator)
+
+    def test_create_token_response(self):
+        bearer = BearerToken()
+        bearer.save_token = mock.MagicMock()
+        uri, headers, body = self.auth.create_authorization_response(
+                self.request, bearer)
+        token = json.loads(body)
+        self.assertIn('access_token', token)
+        self.assertIn('token_type', token)
+        self.assertIn('expires_in', token)
+        self.assertIn('refresh_token', token)
+
+    def test_invalid_arguments(self):
+        pass
+
+    def test_scopes(self):
+        pass
+
+
+class ClientCredentialsGrantTest(TestCase):
+
+    def test_create_token_response(self):
+        # ensure json parsable containing all we want
+        pass
+
+    def test_validate_token_response(self):
+        # wrong grant type, scope
+        pass
