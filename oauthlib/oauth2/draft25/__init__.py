@@ -552,20 +552,20 @@ class AuthorizationEndpoint(object):
     MUST NOT be included more than once.
     """
 
-    def __init__(self, response_type_handlers=None):
-        self._response_type_handlers = response_type_handlers or {}
+    def __init__(self, response_types=None):
+        self._response_types = response_types or {}
 
     @property
-    def response_type_handlers(self):
-        return self._response_type_handlers
+    def response_types(self):
+        return self._response_types
 
-    @response_type_handlers.setter
-    def response_type_handlers(self, handlers):
-        self._response_type_handlers = handlers
+    @response_types.setter
+    def response_types(self, response_types):
+        self._response_types = response_types
 
     @property
-    def token_handler(self):
-        return BearerTokenHandler()
+    def default_token(self):
+        return BearerToken()
 
     def create_authorization_response(self, uri, authorized_scopes,
             http_method=u'GET', body=None, headers=None):
@@ -582,48 +582,49 @@ class AuthorizationEndpoint(object):
             raise AuthorizationEndpoint.UnsupportedResponseTypeError(
                     state=request.state, description=u'Invalid response type')
 
-        return self.response_type_handlers.get(
-                request.response_type)(request, self.token_handler)
+        return self.response_types.get(
+						request.response_type)(request, self.default_token)
 
 
 class TokenEndpoint(object):
 
-    def __init__(self, grant_type_handlers=None):
-        self._grant_type_handlers = grant_type_handlers or {}
+    def __init__(self, grant_types=None):
+        self._grant_types = grant_types or {}
 
     @property
-    def grant_type_handlers(self):
-        return self._grant_type_handlers
+    def grant_types(self):
+        return self._grant_types
 
-    @grant_type_handlers.setter
-    def grant_type_handlers(self, handlers):
-        self._grant_type_handlers = handlers
+    @grant_types.setter
+    def grant_types(self, handlers):
+        self._grant_types = handlers
 
     @property
-    def token_handler(self):
-        return BearerTokenHandler()
+    def default_token(self):
+        return BearerToken()
 
     def create_token_response(self, body, http_method=u'GET', uri=None, headers=None):
         """Validate client, code etc, return body + headers"""
         request = Request(uri, http_method, body, headers)
         request.params = dict(self.request.decoded_body)
         if not u'grant_type' in request.params:
-            raise TokenEndpoint.InvalidRequestError(description=u'Missing grant_type parameter.')
+            raise TokenEndpoint.InvalidRequestError(
+								description=u'Missing grant_type parameter.')
 
         request.grant_type = request.params.get(u'grant_type')
         if not request.grant_type in self.grant_type_handlers:
             raise TokenEndpoint.UnsupportedGrantTypeError()
 
-        return self.grant_type_handlers.get(
-                request.grant_type)(request, self.token_handler)
+        return self.grant_types.get(request.grant_type)(request,
+																											  self.default_token)
 
 
 class ResourceEndpoint(object):
 
     @property
-    def token_handlers(self):
+    def tokens(self):
         return {
-            u'Bearer': BearerTokenHandler(),
+            u'Bearer': BearerToken(),
         }
 
     def verify_request(self, uri, http_method=u'GET', body=None, headers=None):
@@ -634,12 +635,15 @@ class ResourceEndpoint(object):
         if not request.token_type:
             raise ValueError(u'Could not determine the token type.')
 
-        if not request.token_type in self.token_handlers:
+        if not request.token_type in self.tokens:
             raise ValueError(u'Unsupported token type.')
 
-        return self.token_handlers.get(
-                request.token_type).validate_request(request)
+        return self.tokens.get(request.token_type).validate_request(request)
 
+		def find_token_type(self, request):
+				estimates = sorted((t.estimate_type(request) for t in self.tokens))
+				return estimates[0] if len(estimates) else None
+				
 
 class Server(AuthorizationEndpoint, TokenEndpoint, ResourceEndpoint):
     pass

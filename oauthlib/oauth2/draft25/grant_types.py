@@ -1,6 +1,6 @@
 """
-oauthlib.oauth2.draft_25.errors
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+oauthlib.oauth2.draft_25.grant_types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
 from oauthlib.common import generate_token, add_params_to_uri
 from oauthlib.uri_validate import is_absolute_uri
@@ -8,10 +8,15 @@ import json
 import errors
 
 
-class AuthorizationBase(object):
+class RequestValidator(object):
 
-    def validate_request(self, request):
+    @property
+    def response_types(self):
+        return (u'code', u'token')
+
+    def validate_request(self, request, response_types=None):
         request.state = getattr(request, u'state', None)
+				response_types = response_types or self.response_types or []
 
         if not request.client_id:
             raise errors.InvalidRequestError(state=request.state,
@@ -24,7 +29,7 @@ class AuthorizationBase(object):
         if not self.validate_client(request.client_id):
             raise errors.UnauthorizedClientError(state=request.state)
 
-        if not request.response_type in self.response_types:
+        if not request.response_type in response_types:
             raise errors.UnsupportedResponseTypeError(state=request.state)
 
         if request.scopes:
@@ -63,15 +68,15 @@ class AuthorizationBase(object):
         raise NotImplementedError('Subclasses must implement this method.')
 
 
-class AuthorizationCodeGrant(AuthorizationBase):
+class GrantTypeBase(object):
 
-    @property
-    def response_types(self):
-        return (u'code',)
+    def create_authorization_response(self, request): 
+        raise NotImplementedError('Subclasses must implement this method.')
 
-    @property
-    def expires_in(self):
-        return 3600
+    def create_token_response(self, request, token_handler):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+class AuthorizationCodeGrant(GrantTypeBase):
 
     @property
     def scopes(self):
@@ -81,13 +86,8 @@ class AuthorizationCodeGrant(AuthorizationBase):
     def error_uri(self):
         return u'/oauth_error'
 
-    def create_authorization_token(self, request):
-        return {
-            u'access_token': generate_token(),
-            u'refresh_token': generate_token(),
-            u'expires_in': getattr(request, u'expires_in', self.expires_in),
-            u'scope': ' '.join(getattr(request, u'scopes', self.scopes))
-        }
+		def __init__(self, request_validator=None):
+			self.request_validator = request_validator or RequestValidator()
 
     def create_authorization_code(self, request):
         """Generates an authorization grant represented as a dictionary."""
@@ -100,13 +100,9 @@ class AuthorizationCodeGrant(AuthorizationBase):
         """Saves authorization codes for later use by the token endpoint."""
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def save_authorization_token(self, client_id, token):
-        """Saves authorization codes for later use by the token endpoint."""
-        raise NotImplementedError('Subclasses must implement this method.')
-
     def create_authorization_response(self, request):
         try:
-            self.validate_request(request)
+            self.request_validator.validate_request(request)
 
         except errors.OAuth2Error as e:
             request.redirect_uri = getattr(request, u'redirect_uri',
@@ -127,16 +123,13 @@ class AuthorizationCodeGrant(AuthorizationBase):
         code is bound to the client identifier and redirection URI.
         """
         try:
-            self.validate_request(request)
+            self.validate_token_request(request)
 
         except errors.OAuth2Error as e:
             return e.json
 
         request.scopes = self.get_scopes(request.client, request.code)
-        token = self.create_authorization_token(request)
-        token = token_handler(token)
-        self.save_authorization_token(request.client_id, token)
-        return json.dumps(token)
+        return json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
 
@@ -148,7 +141,8 @@ class AuthorizationCodeGrant(AuthorizationBase):
                     description=u'Missing code parameter.')
 
         if (not hasattr(request, 'client') or
-            not self.validate_client(request.client, request.grant_type)):
+            not self.request_validator.validate_client(request.client, 
+																											 request.grant_type)):
             raise errors.UnauthorizedClientError()
 
         if not self.validate_code(request.client, request.code):
@@ -158,33 +152,19 @@ class AuthorizationCodeGrant(AuthorizationBase):
         raise NotImplementedError('Subclasses must implement this method.')
 
 
-class ImplicitGrant(AuthorizationBase):
+class ImplicitGrant(GrantTypeBase):
 
-    @property
-    def expires_in(self):
-        return 3600
+		def __init__(self, request_validator=None):
+			self.request_validator = request_validator or RequestValidator()
 
-    def create_token(self, request):
-        return {
-            u'access_token': generate_token(),
-            u'expires_in': self.expires_in,
-            u'scope': ' '.join(request.scopes),
-            u'state': request.state
-        }
-
-    def save_grant(self, client_id, grant, state=None):
-        raise NotImplementedError('Subclasses must implement this method.')
-
-    def create_authorization_response(self, request, token_handler):
+    def create_token_response(self, request, token_handler):
         try:
-            self.validate_request(request)
+            self.request_validator.validate_request(request)
 
         except errors.OAuth2Error as e:
             return add_params_to_uri(
                     request.redirect_uri, e.twotuples, fragment=True)
 
-        self.token = self.create_token(request)
-        self.token = token_handler(self, self.token)
-        self.save_grant(request.client_id, self.token, state=request.state)
+        token = token_handler(request, refresh_token=False)
         return add_params_to_uri(
                 request.redirect_uri, self.token.items(), fragment=True)

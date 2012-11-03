@@ -132,9 +132,30 @@ def prepare_bearer_body(token, body=u''):
     return add_params_to_qs(body, [((u'access_token', token))])
 
 
-class BearerTokenHandler(object):
+class BearerToken(object):
 
-    def __call__(self, endpoint, grant):
+    @property
+    def expires_in(self):
+        return 3600
+
+    def create_token(self, request):
+        return {
+            u'access_token': generate_token(),
+            u'expires_in': self.expires_in,
+            u'scope': ' '.join(request.scopes),
+            u'state': request.state
+        }
+    def save_authorization_token(self, client_id, token):
+        """Saves authorization codes for later use by the token endpoint."""
+        raise NotImplementedError('Subclasses must implement this method.')
+    def create_authorization_token(self, request):
+        return {
+            u'access_token': generate_token(),
+            u'refresh_token': generate_token(),
+            u'expires_in': getattr(request, u'expires_in', self.expires_in),
+            u'scope': ' '.join(getattr(request, u'scopes', self.scopes))
+        }
+    def __call__(self, request, refresh_token=False):
         grant[u'token_type'] = u'Bearer'
         return grant
 
