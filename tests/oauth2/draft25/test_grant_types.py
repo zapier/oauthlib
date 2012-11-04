@@ -11,6 +11,7 @@ from oauthlib.oauth2.draft25.errors import UnauthorizedClientError
 from oauthlib.oauth2.draft25.errors import InvalidGrantError
 from oauthlib.oauth2.draft25.grant_types import AuthorizationCodeGrant
 from oauthlib.oauth2.draft25.grant_types import ImplicitGrant
+from oauthlib.oauth2.draft25.grant_types import ResourceOwnerPasswordCredentialsGrant
 from oauthlib.oauth2.draft25.tokens import BearerToken
 
 
@@ -75,6 +76,12 @@ class AuthorizationCodeGrantTest(TestCase):
 
 class ImplicitGrantTest(TestCase):
 
+    def setUp(self):
+        # TODO: query params
+        self.request = Request(u'http://a.b/path')
+        self.mock_validator = mock.MagicMock()
+        self.auth = ImplicitGrant(request_validator=self.mock_validator)
+
     def test_create_token_response(self):
         # ensure json parsable containing all we want
         pass
@@ -87,15 +94,20 @@ class ImplicitGrantTest(TestCase):
 class ResourceOwnerPasswordCredentialsGrantTest(TestCase):
 
     def setUp(self):
-        self.request = Request(u'http://a.b/path')
-        self.request.body = u'grant_type=password&username=john&password=doe'
+        self.request = Request('http://a.b/path')
+        self.request.grant_type = 'password'
+        self.request.username = 'john'
+        self.request.password = 'doe'
+        self.request.client = 'mock authenticated'
+        self.request.scopes = ('mocked', 'scopes')
         self.mock_validator = mock.MagicMock()
-        self.auth = ImplicitGrant(request_validator=self.mock_validator)
+        self.auth = ResourceOwnerPasswordCredentialsGrant(
+                request_validator=self.mock_validator)
 
     def test_create_token_response(self):
         bearer = BearerToken()
         bearer.save_token = mock.MagicMock()
-        uri, headers, body = self.auth.create_authorization_response(
+        uri, headers, body = self.auth.create_token_response(
                 self.request, bearer)
         token = json.loads(body)
         self.assertIn('access_token', token)

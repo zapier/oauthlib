@@ -150,7 +150,7 @@ class BearerToken(TokenBase):
     def expires_in(self):
         return 3600
 
-    def save_token(self, client_id, token):
+    def save_token(self, request, token):
         """Saves authorization codes for later use by the token endpoint."""
         raise NotImplementedError('Subclasses must implement this method.')
 
@@ -167,7 +167,7 @@ class BearerToken(TokenBase):
         if refresh_token:
             token[u'refresh_token'] = generate_token()
 
-        self.save_token(request.client_id, token)
+        self.save_token(request, token)
         return token
 
     def validate_request(self, request):

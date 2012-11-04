@@ -49,6 +49,7 @@ class RequestValidator(object):
         return True
 
     def validate_request_scopes(self, request):
+        request.state = getattr(request, u'state', None)
         if request.scopes:
             if not self.validate_scopes(request.client_id, request.scopes):
                 raise errors.InvalidScopeError(state=request.state)
@@ -107,7 +108,7 @@ class AuthorizationCodeGrant(GrantTypeBase):
         """Saves authorization codes for later use by the token endpoint."""
         raise NotImplementedError('Subclasses must implement this method.')
 
-    def create_authorization_response(self, request):
+    def create_authorization_response(self, request, token_handler):
         try:
             self.request_validator.validate_request(request)
 
@@ -425,8 +426,8 @@ class ClientCredentialsGrant(GrantTypeBase):
             self.request_validator.authenticate_client(request)
             self.validate_token_request(request)
         except errors.OAuth2Error as e:
-            return e.json
-        return json.dumps(token_handler(request, refresh_token=True))
+            return None, {}, e.json
+        return None, {}, json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
         if not getattr(request, 'grant_type'):
