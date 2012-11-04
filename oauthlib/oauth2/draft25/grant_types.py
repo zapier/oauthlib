@@ -32,11 +32,7 @@ class RequestValidator(object):
         if not request.response_type in response_types:
             raise errors.UnsupportedResponseTypeError(state=request.state)
 
-        if request.scopes:
-            if not self.validate_scopes(request.client_id, request.scopes):
-                raise errors.InvalidScopeError(state=request.state)
-        else:
-            request.scopes = self.get_default_scopes(request.client_id)
+        self.validate_request_scopes(request)
 
         if getattr(request, u'redirect_uri', None):
             if not is_absolute_uri(request.redirect_uri):
@@ -52,10 +48,20 @@ class RequestValidator(object):
 
         return True
 
+    def validate_request_scopes(self, request):
+        if request.scopes:
+            if not self.validate_scopes(request.client_id, request.scopes):
+                raise errors.InvalidScopeError(state=request.state)
+        else:
+            request.scopes = self.get_default_scopes(request.client_id)
+
     def validate_client(self, client, *args, **kwargs):
         raise NotImplementedError('Subclasses must implement this method.')
 
     def validate_scopes(self, client, scopes):
+        raise NotImplementedError('Subclasses must implement this method.')
+
+    def validate_user(self, username, password, client=None):
         raise NotImplementedError('Subclasses must implement this method.')
 
     def validate_redirect_uri(self, client, redirect_uri):
@@ -125,10 +131,8 @@ class AuthorizationCodeGrant(GrantTypeBase):
         """
         try:
             self.validate_token_request(request)
-
         except errors.OAuth2Error as e:
             return e.json
-
         return json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
@@ -175,18 +179,89 @@ class ResourceOwnerPasswordCredentialsGrant(GrantTypeBase):
     def __init__(self, request_validator=None):
         self.request_validator = request_validator or RequestValidator()
 
-    def create_token_response(self, request, token_handler):
+    def create_token_response(self, request, token_handler,
+            require_authentication=True):
+        """Return token or error in json format.
+
+        The client makes a request to the token endpoint by adding the
+        following parameters using the "application/x-www-form-urlencoded"
+        format per Appendix B with a character encoding of UTF-8 in the HTTP
+        request entity-body:
+
+        grant_type
+                REQUIRED.  Value MUST be set to "password".
+
+        username
+                REQUIRED.  The resource owner username.
+
+        password
+                REQUIRED.  The resource owner password.
+
+        scope
+                OPTIONAL.  The scope of the access request as described by
+                `Section 3.3`_.
+
+        If the client type is confidential or the client was issued client
+        credentials (or assigned other authentication requirements), the
+        client MUST authenticate with the authorization server as described
+        in `Section 3.2.1`_.
+
+        For example, the client makes the following HTTP request using
+        transport-layer security (with extra line breaks for display purposes
+        only):
+
+            POST /token HTTP/1.1
+            Host: server.example.com
+            Authorization: Basic czZCaGRSa3F0MzpnWDFmQmF0M2JW
+            Content-Type: application/x-www-form-urlencoded
+
+            grant_type=password&username=johndoe&password=A3ddj3w
+
+        The authorization server MUST:
+
+        o  require client authentication for confidential clients or for any
+            client that was issued client credentials (or with other
+            authentication requirements),
+
+        o  authenticate the client if client authentication is included, and
+
+        o  validate the resource owner password credentials using its
+            existing password validation algorithm.
+
+        Since this access token request utilizes the resource owner's
+        password, the authorization server MUST protect the endpoint against
+        brute force attacks (e.g., using rate-limitation or generating
+        alerts).
+
+        .. _`Section 3.3`: http://tools.ietf.org/html/rfc6749#section-3.3
+        .. _`Section 3.2.1`: http://tools.ietf.org/html/rfc6749#section-3.2.1
+        """
         try:
+            if require_authentication:
+                self.request_validator.authenticate_client(request)
             self.validate_token_request(request)
-
         except errors.OAuth2Error as e:
-            return e.json
-
-        return json.dumps(token_handler(request, refresh_token=True))
+            return None, {}, e.json
+        return None, {}, json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
-        # validate grant type, username, password, scope
-        pass
+        for param in ('grant_type', 'username', 'password'):
+            if not getattr(request, param):
+                raise errors.InvalidRequestError(
+                        'Request is missing %s parameter.' % param)
+
+        # This error should rarely (if ever) occur if requests are routed to
+        # grant type handlers based on the grant_type parameter.
+        if not request.grant_type == 'password':
+            raise errors.UnsupportedGrantTypeError()
+
+        # request.client is populated during client authentication
+        client = request.client if getattr(request, 'client') else None
+        if not self.request_validator.validate_user(request.username,
+                request.password, client=client):
+            raise errors.InvalidGrantError('Invalid credentials given.')
+
+        self.request_validator.validate_request_scopes(request)
 
 
 class ClientCredentialsGrant(GrantTypeBase):
@@ -197,10 +272,8 @@ class ClientCredentialsGrant(GrantTypeBase):
     def create_token_response(self, request, token_handler):
         try:
             self.validate_token_request(request)
-
         except errors.OAuth2Error as e:
             return e.json
-
         return json.dumps(token_handler(request, refresh_token=True))
 
     def validate_token_request(self, request):
