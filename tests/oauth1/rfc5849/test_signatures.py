@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, unicode_literals
 
+import os
+
 try:
     from urllib import quote
 except ImportError:
@@ -13,7 +15,7 @@ from oauthlib.oauth1.rfc5849.signature import normalize_parameters
 from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha1, sign_hmac_sha1_with_client
 from oauthlib.oauth1.rfc5849.signature import sign_rsa_sha1, sign_rsa_sha1_with_client
 from oauthlib.oauth1.rfc5849.signature import sign_plaintext, sign_plaintext_with_client
-from oauthlib.common import unicode_type
+from oauthlib.common import unicode_type, to_unicode
 from ...unittest import TestCase
 
 
@@ -27,7 +29,7 @@ class SignatureTests(TestCase):
 
         def decode(self):
             for k, v in self.items():
-                self[k] = v.decode('utf-8')
+                self[k] = to_unicode(v)
 
     uri_query = "b5=%3D%253D&a3=a&c%40=&a2=r%20b&c2=&a3=2+q"
     authorization_header = """OAuth realm="Example",
@@ -314,6 +316,13 @@ class SignatureTests(TestCase):
 
         control_signature = self.control_signature_rsa_sha1
 
+        os.environ['OAUTHLIB_FORCE_PYCRYPTO'] = ''
+        sign = sign_rsa_sha1(base_string, private_key)
+        self.assertEquals(sign, control_signature)
+        sign = sign_rsa_sha1(base_string.decode('utf-8'), private_key)
+        self.assertEquals(sign, control_signature)
+
+        os.environ['OAUTHLIB_FORCE_PYCRYPTO'] = '1'
         sign = sign_rsa_sha1(base_string, private_key)
         self.assertEquals(sign, control_signature)
         sign = sign_rsa_sha1(base_string.decode('utf-8'), private_key)
@@ -327,16 +336,19 @@ class SignatureTests(TestCase):
 
         control_signature = self.control_signature_rsa_sha1
 
+        os.environ['OAUTHLIB_FORCE_PYCRYPTO'] = ''
         sign = sign_rsa_sha1_with_client(base_string, self.client)
-
         self.assertEquals(sign, control_signature)
-
         self.client.decode() ## Decode `rsa_private_key` from UTF-8
-
         sign = sign_rsa_sha1_with_client(base_string, self.client)
-
         self.assertEquals(sign, control_signature)
 
+        os.environ['OAUTHLIB_FORCE_PYCRYPTO'] = '1'
+        sign = sign_rsa_sha1_with_client(base_string, self.client)
+        self.assertEquals(sign, control_signature)
+        self.client.decode() ## Decode `rsa_private_key` from UTF-8
+        sign = sign_rsa_sha1_with_client(base_string, self.client)
+        self.assertEquals(sign, control_signature)
 
     control_signature_plaintext = (
         "ECrDNoq1VYzzzzzzzzzyAK7TwZNtPnkqatqZZZZ&"

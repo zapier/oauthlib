@@ -329,6 +329,11 @@ def to_unicode(data, encoding='UTF-8'):
     return data
 
 
+def to_bytes(data, encoding='UTF-8'):
+    data = to_unicode(data, encoding=encoding)
+    return data.encode(encoding)
+
+
 class CaseInsensitiveDict(dict):
     """Basic case insensitive dict with strings only keys."""
 

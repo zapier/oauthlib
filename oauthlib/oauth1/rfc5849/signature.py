@@ -26,13 +26,16 @@ from __future__ import absolute_import, unicode_literals
 import binascii
 import hashlib
 import hmac
+import os
+
 try:
     import urlparse
 except ImportError:
     import urllib.parse as urlparse
+
 from . import utils
 from oauthlib.common import urldecode, extract_params, safe_string_equals
-from oauthlib.common import bytes_type, unicode_type
+from oauthlib.common import bytes_type, unicode_type, to_bytes, to_unicode
 
 
 def construct_base_string(http_method, base_string_uri,
@@ -408,11 +411,119 @@ def normalize_parameters(params):
     return '&'.join(parameter_parts)
 
 
+def cryptography_rsa_signer():
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    def sign(key_data, base_string):
+        key = load_pem_private_key(to_bytes(key_data), None, backend=default_backend())
+        signer = key.signer(padding.PKCS1v15(), hashes.SHA1())
+        signer.update(to_bytes(base_string))
+        return to_unicode(binascii.b2a_base64(signer.finalize())[:-1])
+    return sign
+
+
+def cryptography_rsa_verifier():
+    from cryptography.hazmat.backends.openssl.backend import Backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+    from cryptography.exceptions import InvalidSignature
+
+    def verifier(message, signature, public_key):
+        sig = binascii.a2b_base64(to_bytes(signature))
+        key = load_pem_public_key(to_bytes(public_key), backend=Backend())
+        v = key.verifier(sig, padding.PKCS1v15(), hashes.SHA1())
+        v.update(to_bytes(message))
+        try:
+            v.verify()
+            return True
+        except InvalidSignature:
+            return False
+    return verifier
+
+
+def pycrypto_rsa_signer():
+    from Crypto.PublicKey import RSA
+    from Crypto.Signature import PKCS1_v1_5
+    from Crypto.Hash import SHA
+    def sign(key_data, base_string):
+        key = RSA.importKey(key_data)
+        if isinstance(base_string, unicode_type):
+            base_string = base_string.encode('utf-8')
+        h = SHA.new(base_string)
+        p = PKCS1_v1_5.new(key)
+        return binascii.b2a_base64(p.sign(h))[:-1].decode('utf-8')
+    return sign
+
+
+def pycrypto_rsa_verifier():
+    from Crypto.PublicKey import RSA
+    from Crypto.Signature import PKCS1_v1_5
+    from Crypto.Hash import SHA
+    def verifier(message, signature, public_key):
+        key = RSA.importKey(public_key)
+        h = SHA.new(message.encode('utf-8'))
+        p = PKCS1_v1_5.new(key)
+        sig = binascii.a2b_base64(signature.encode('utf-8'))
+        return p.verify(h, sig)
+    return verifier
+
+
+def get_rsa_signer():
+    """Check available crypto libraries and return a signing function.
+
+    Currently we support both Cryptography as well as PyCrypto with
+    a preference for the former if available.
+    """
+    if not os.environ.get('OAUTHLIB_FORCE_PYCRYPTO', None):
+        try:
+            import cryptography
+            return cryptography_rsa_signer()
+        except ImportError:
+            pass
+
+    try:
+        import Crypto
+        return pycrypto_rsa_signer()
+    except ImportError:
+        pass
+
+    raise ImportError('No available cryptography library found. Please install'
+                      ' either pycrypto or cryptography.')
+
+
+def get_rsa_verifier():
+    """Check available crypto libraries and return a signing function.
+
+    Currently we support both Cryptography as well as PyCrypto with
+    a preference for the former if available.
+    """
+    if not os.environ.get('OAUTHLIB_FORCE_PYCRYPTO', None):
+        try:
+            import cryptography
+            return cryptography_rsa_verifier()
+        except ImportError:
+            pass
+
+    try:
+        import Crypto
+        return pycrypto_rsa_verifier()
+    except ImportError:
+        pass
+
+    raise ImportError('No available cryptography library found. Please install'
+                      ' either pycrypto or cryptography.')
+
+
 def sign_hmac_sha1_with_client(base_string, client):
-    return sign_hmac_sha1(base_string, 
+    return sign_hmac_sha1(base_string,
         client.client_secret,
         client.resource_owner_secret
     )
+
 
 def sign_hmac_sha1(base_string, client_secret, resource_owner_secret):
     """**HMAC-SHA1**
@@ -482,16 +593,8 @@ def sign_rsa_sha1(base_string, rsa_private_key):
     .. _`RFC3447, Section 8.2`: http://tools.ietf.org/html/rfc3447#section-8.2
 
     """
-    # TODO: finish RSA documentation
-    from Crypto.PublicKey import RSA
-    from Crypto.Signature import PKCS1_v1_5
-    from Crypto.Hash import SHA
-    key = RSA.importKey(rsa_private_key)
-    if isinstance(base_string, unicode_type):
-        base_string = base_string.encode('utf-8')
-    h = SHA.new(base_string)
-    p = PKCS1_v1_5.new(key)
-    return binascii.b2a_base64(p.sign(h))[:-1].decode('utf-8')
+    signer = get_rsa_signer()
+    return signer(rsa_private_key, base_string)
 
 
 def sign_rsa_sha1_with_client(base_string, client):
@@ -536,6 +639,7 @@ def sign_plaintext(client_secret, resource_owner_secret):
 def sign_plaintext_with_client(base_string, client):
     return sign_plaintext(client.client_secret, client.resource_owner_secret)
 
+
 def verify_hmac_sha1(request, client_secret=None,
     resource_owner_secret=None):
     """Verify a HMAC-SHA1 signature.
@@ -578,17 +682,11 @@ def verify_rsa_sha1(request, rsa_public_key):
 
     .. _`RFC2616 section 5.2`: http://tools.ietf.org/html/rfc2616#section-5.2
     """
-    from Crypto.PublicKey import RSA
-    from Crypto.Signature import PKCS1_v1_5
-    from Crypto.Hash import SHA
-    key = RSA.importKey(rsa_public_key)
+    verifier = get_rsa_verifier()
     norm_params = normalize_parameters(request.params)
     uri = normalize_base_string_uri(request.uri)
     message = construct_base_string(request.http_method, uri, norm_params)
-    h = SHA.new(message.encode('utf-8'))
-    p = PKCS1_v1_5.new(key)
-    sig = binascii.a2b_base64(request.signature.encode('utf-8'))
-    return p.verify(h, sig)
+    return verifier(message, request.signature, rsa_public_key)
 
 
 def verify_plaintext(request, client_secret=None, resource_owner_secret=None):
