@@ -300,14 +300,6 @@ class Client(object):
             raise ValueError(
                 'Body signatures may only be used with form-urlencoded content')
 
-        # We amend https://tools.ietf.org/html/rfc5849#section-3.4.1.3.1
-        # with the clause that parameters from body should only be included
-        # in non GET or HEAD requests. Extracting the request body parameters
-        # and including them in the signature base string would give semantic
-        # meaning to the body, which it should not have according to the
-        # HTTP 1.1 spec.
-        elif http_method.upper() in ('GET', 'HEAD') and has_params:
-            raise ValueError('GET/HEAD requests should not include body.')
 
         # generate the basic OAuth parameters
         request.oauth_params = self.get_oauth_params(request)
